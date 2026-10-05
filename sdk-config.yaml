@@ -1,0 +1,23 @@
+ModuleName: SpringBoot
+ApiNamespace: threeport.io
+ApiDocs:
+  Title: Spring Boot Threeport API
+  Description: API server for the Threeport Spring Boot module.
+  ContactName: Juan Jose Restrepo
+  ContactEmail: juan.restrepo@intechideas.com
+ImageNamespace: docker.io/juanqleet
+ApiObjectGroups:
+- Name: springboot
+  Objects:
+    - Name: SpringBootDefinition
+      Versions:
+        - v0
+      Reconcilable: true
+      Tptctl:
+        Enabled: true
+    - Name: SpringBootInstance
+      Versions:
+        - v0
+      Reconcilable: true
+      Tptctl:
+        Enabled: true
