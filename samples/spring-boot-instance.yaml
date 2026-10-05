@@ -1,0 +1,18 @@
+# A Spring Boot instance deployed from an existing definition.
+#
+#   tptctl spring-boot create spring-boot-instance -c samples/spring-boot-instance.yaml
+SpringBootInstance:
+  Name: petclinic-dev
+  SpringBootDefinition:
+    Name: petclinic
+  # KubernetesRuntimeInstance is optional. Left out, as it is here, a create
+  # puts the instance on the control plane's default runtime, which is what a
+  # single-cluster install wants. Name one to deploy somewhere else:
+  #
+  #   KubernetesRuntimeInstance:
+  #     Name: my-runtime
+  #
+  # A replace leaves the instance on the runtime it is already on, whether or
+  # not this field is set, so editing another field here cannot move a running
+  # workload to a different cluster. Naming a different runtime in a replace is
+  # reported as an error rather than performed.

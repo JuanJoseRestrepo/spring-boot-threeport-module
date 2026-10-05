@@ -7,9 +7,11 @@ import (
 	"fmt"
 	tpapi_v0 "github.com/threeport/threeport/pkg/api/v0"
 	util "github.com/threeport/threeport/pkg/util/v0"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"net/http"
 	api_v0 "spring-boot-threeport-module/pkg/api/v0"
 	client_v0 "spring-boot-threeport-module/pkg/client/v0"
+	"strings"
 )
 
 // SpringBootDefinitionConfig is a config abstraction for the SpringBootDefinition API object.
@@ -23,9 +25,44 @@ type SpringBootDefinitionConfig struct {
 // SpringBootDefinitionValues contains all the attributes needed to manage
 // the SpringBootDefinition API object.
 type SpringBootDefinitionValues struct {
-	// TODO: add config abstraction fields needed for user to manage a SpringBootDefinition
 	Name *string
-	Age  *string
+
+	// The container image for the Spring Boot application. Required: a Spring
+	// Boot project is packaged as a jar it builds itself, so there is no
+	// canonical public image and the module cannot deploy anything without one.
+	Image *string
+
+	// The value for SPRING_PROFILES_ACTIVE, e.g. postgres,prod. Spring reads it
+	// as a comma separated list and the module does not interpret it.
+	Profile *string
+
+	// The port the application serves on. Left unset, the API defaults it to
+	// 8080, which is what Spring Boot serves on unless the project changed
+	// server.port.
+	ServerPort *int
+
+	// Options passed to the JVM through JAVA_TOOL_OPTIONS, e.g. -Xmx512m.
+	JavaOpts *string
+
+	// The environment the definition is deployed for. It becomes a Kubernetes
+	// label and picks the replica and storage defaults; only "prod" is
+	// special-cased, anything else gets the development sizing.
+	Environment *string
+
+	// The number of application pods. Left unset, the environment decides.
+	Replicas *int
+
+	// The database to deploy alongside the application: none or postgres. Left
+	// unset, the API defaults it to none, because a Spring Boot application can
+	// run on an embedded database and most do in development.
+	Database *string
+
+	// The HTTP path the probes ask for. Left unset, the API defaults it to
+	// Spring Boot Actuator's health endpoint. An image without the actuator has
+	// to point this somewhere that answers.
+	HealthPath *string
+
+	Age *string
 }
 
 // Get gets spring boot definitions from the Threeport API.
@@ -59,11 +96,18 @@ func (s *SpringBootDefinitionConfig) Get(
 	// assemble config objects from API objects
 	var springBootDefinitionConfigs []SpringBootDefinitionConfig
 	for _, springBootDefinition := range *springBootDefinitions {
-		// TODO: add config abstraction fields needed for user to manage a SpringBootDefinition
 		springBootDefinitionConfig := SpringBootDefinitionConfig{
 			SpringBootDefinition: SpringBootDefinitionValues{
-				Age:  util.Ptr(util.GetAgeFormatted(springBootDefinition.CreatedAt)),
-				Name: springBootDefinition.Name,
+				Name:        springBootDefinition.Name,
+				Image:       springBootDefinition.Image,
+				Profile:     springBootDefinition.Profile,
+				ServerPort:  springBootDefinition.ServerPort,
+				JavaOpts:    springBootDefinition.JavaOpts,
+				Environment: springBootDefinition.Environment,
+				Replicas:    springBootDefinition.Replicas,
+				Database:    springBootDefinition.Database,
+				HealthPath:  springBootDefinition.HealthPath,
+				Age:         util.Ptr(util.GetAgeFormatted(springBootDefinition.CreatedAt)),
 			},
 		}
 		springBootDefinitionConfigs = append(springBootDefinitionConfigs, springBootDefinitionConfig)
@@ -81,15 +125,28 @@ func (s *SpringBootDefinitionConfig) Create(
 
 	// validate config
 	if err := s.Validate(); err != nil {
-		return nil, fmt.Errorf("failed to validate values for spring boot definition with name %s: %w", *springBootDefinitionValues.Name, err)
+		// the name is not interpolated here: a missing name is one of the things
+		// Validate reports, so reading it to describe the failure would panic on
+		// exactly the config this line exists to explain
+		return nil, fmt.Errorf("failed to validate values for spring boot definition: %w", err)
 	}
 
-	// construct spring boot definition object
-	// TODO: add API object fields as needed for SpringBootDefinition
+	// construct spring boot definition object. Optional fields are passed through as
+	// they arrive, including nil: the API applies its own defaults for
+	// Environment, ServerPort, Database and HealthPath, and repeating them here
+	// would mean two places to change when one of them moves.
 	springBootDefinition := api_v0.SpringBootDefinition{
 		Definition: tpapi_v0.Definition{
 			Name: springBootDefinitionValues.Name,
 		},
+		Image:       springBootDefinitionValues.Image,
+		Profile:     springBootDefinitionValues.Profile,
+		ServerPort:  springBootDefinitionValues.ServerPort,
+		JavaOpts:    springBootDefinitionValues.JavaOpts,
+		Environment: springBootDefinitionValues.Environment,
+		Replicas:    springBootDefinitionValues.Replicas,
+		Database:    springBootDefinitionValues.Database,
+		HealthPath:  springBootDefinitionValues.HealthPath,
 	}
 
 	// create spring boot definition
@@ -103,11 +160,18 @@ func (s *SpringBootDefinitionConfig) Create(
 	}
 
 	// construct spring boot definition config
-	// TODO: add config abstraction fields needed for user to manage a SpringBootDefinition
 	createdSpringBootDefinitionConfig := &SpringBootDefinitionConfig{
 		SpringBootDefinition: SpringBootDefinitionValues{
-			Age:  util.Ptr(util.GetAgeFormatted(createdSpringBootDefinition.CreatedAt)),
-			Name: createdSpringBootDefinition.Name,
+			Name:        createdSpringBootDefinition.Name,
+			Image:       createdSpringBootDefinition.Image,
+			Profile:     createdSpringBootDefinition.Profile,
+			ServerPort:  createdSpringBootDefinition.ServerPort,
+			JavaOpts:    createdSpringBootDefinition.JavaOpts,
+			Environment: createdSpringBootDefinition.Environment,
+			Replicas:    createdSpringBootDefinition.Replicas,
+			Database:    createdSpringBootDefinition.Database,
+			HealthPath:  createdSpringBootDefinition.HealthPath,
+			Age:         util.Ptr(util.GetAgeFormatted(createdSpringBootDefinition.CreatedAt)),
 		},
 	}
 
@@ -140,8 +204,9 @@ func (s *SpringBootDefinitionConfig) Replace(
 		return nil, fmt.Errorf("failed to find spring boot definition with name %s: %w", name, err)
 	}
 
-	// construct updated spring boot definition object
-	// TODO: add API object fields as needed for SpringBootDefinition
+	// construct updated spring boot definition object. This is a full replacement, so
+	// every field the user can set is sent: a field left out of the config is
+	// meant to be cleared, not carried over from the existing object.
 	updatedSpringBootDefinition := &api_v0.SpringBootDefinition{
 		Common: tpapi_v0.Common{
 			ID: existingSpringBootDefinition.ID,
@@ -149,6 +214,20 @@ func (s *SpringBootDefinitionConfig) Replace(
 		Definition: tpapi_v0.Definition{
 			Name: springBootDefinitionValues.Name,
 		},
+		Image:       springBootDefinitionValues.Image,
+		Profile:     springBootDefinitionValues.Profile,
+		ServerPort:  springBootDefinitionValues.ServerPort,
+		JavaOpts:    springBootDefinitionValues.JavaOpts,
+		Environment: springBootDefinitionValues.Environment,
+		Replicas:    springBootDefinitionValues.Replicas,
+		Database:    springBootDefinitionValues.Database,
+		HealthPath:  springBootDefinitionValues.HealthPath,
+
+		// the workload definition is an owned relationship the reconciler sets,
+		// not something the user configures. A replacement that left it out
+		// would be asking the API to clear it, which it refuses because an owned
+		// relationship is immutable once set.
+		KubernetesWorkloadDefinitionID: existingSpringBootDefinition.KubernetesWorkloadDefinitionID,
 	}
 
 	// replace spring boot definition
@@ -162,11 +241,18 @@ func (s *SpringBootDefinitionConfig) Replace(
 	}
 
 	// construct updated spring boot definition config
-	// TODO: add config abstraction fields needed for user to manage a SpringBootDefinition
 	updatedSpringBootDefinitionConfig := &SpringBootDefinitionConfig{
 		SpringBootDefinition: SpringBootDefinitionValues{
-			Age:  util.Ptr(util.GetAgeFormatted(replacedSpringBootDefinition.CreatedAt)),
-			Name: replacedSpringBootDefinition.Name,
+			Name:        replacedSpringBootDefinition.Name,
+			Image:       replacedSpringBootDefinition.Image,
+			Profile:     replacedSpringBootDefinition.Profile,
+			ServerPort:  replacedSpringBootDefinition.ServerPort,
+			JavaOpts:    replacedSpringBootDefinition.JavaOpts,
+			Environment: replacedSpringBootDefinition.Environment,
+			Replicas:    replacedSpringBootDefinition.Replicas,
+			Database:    replacedSpringBootDefinition.Database,
+			HealthPath:  replacedSpringBootDefinition.HealthPath,
+			Age:         util.Ptr(util.GetAgeFormatted(replacedSpringBootDefinition.CreatedAt)),
 		},
 	}
 
@@ -179,6 +265,12 @@ func (s *SpringBootDefinitionConfig) Delete(
 	apiEndpoint string,
 ) (*SpringBootDefinitionConfig, error) {
 	springBootDefinitionValues := s.SpringBootDefinition
+
+	// delete works by name, and unlike create it does not run Validate first,
+	// so the name is checked here rather than dereferenced blind
+	if springBootDefinitionValues.Name == nil {
+		return nil, errors.New("missing required field in config: Name")
+	}
 
 	// get spring boot definition by name
 	springBootDefinition, err := client_v0.GetSpringBootDefinitionByName(
@@ -201,7 +293,6 @@ func (s *SpringBootDefinitionConfig) Delete(
 	}
 
 	// construct deleted spring boot definition config
-	// TODO: add config abstraction fields needed for user to manage a SpringBootDefinition
 	deletedSpringBootDefinitionConfig := &SpringBootDefinitionConfig{
 		SpringBootDefinition: SpringBootDefinitionValues{
 			Name: deletedSpringBootDefinition.Name,
@@ -221,7 +312,84 @@ func (s *SpringBootDefinitionConfig) Validate() error {
 		multiError.AppendError(errors.New("missing required field in config: Name"))
 	}
 
-	// TODO: add additional validation as needed
+	// the name is the app.kubernetes.io/instance label on every object the
+	// module renders, and also the prefix of the resource names, so it is
+	// subject to the same late failure the environment check prevents
+	if springBootDefinitionValues.Name != nil {
+		if errs := validation.IsValidLabelValue(*springBootDefinitionValues.Name); len(errs) > 0 {
+			multiError.AppendError(fmt.Errorf(
+				"invalid value in config for Name: %s: %s",
+				*springBootDefinitionValues.Name, strings.Join(errs, "; "),
+			))
+		}
+	}
+
+	// the API rejects a definition without an image, but it does so with a
+	// database constraint error rather than something a user can act on
+	if springBootDefinitionValues.Image == nil {
+		multiError.AppendError(errors.New("missing required field in config: Image"))
+	}
+
+	// the environment becomes a Kubernetes label value. An invalid one is not
+	// rejected until Threeport tries to apply the manifest, well after the
+	// definition was accepted, so it is caught here instead.
+	if springBootDefinitionValues.Environment != nil {
+		if errs := validation.IsValidLabelValue(*springBootDefinitionValues.Environment); len(errs) > 0 {
+			multiError.AppendError(fmt.Errorf(
+				"invalid value in config for Environment: %s: %s",
+				*springBootDefinitionValues.Environment, strings.Join(errs, "; "),
+			))
+		}
+	}
+
+	// a negative replica count is rejected by the kube API for the same reason,
+	// and just as late
+	if springBootDefinitionValues.Replicas != nil && *springBootDefinitionValues.Replicas < 0 {
+		multiError.AppendError(fmt.Errorf(
+			"invalid value in config for Replicas: %d: must not be negative",
+			*springBootDefinitionValues.Replicas,
+		))
+	}
+
+	// a port outside the range is rejected by the kube API, again only once the
+	// manifest is applied
+	if springBootDefinitionValues.ServerPort != nil {
+		port := *springBootDefinitionValues.ServerPort
+		if port < 1 || port > 65535 {
+			multiError.AppendError(fmt.Errorf(
+				"invalid value in config for ServerPort: %d: must be between 1 and 65535",
+				port,
+			))
+		}
+	}
+
+	// an unrecognised database is the one invalid value nothing downstream
+	// rejects: the manifest deploys PostgreSQL only for "postgres" and renders
+	// an application with no database for anything else, so a typo such as
+	// "postgresql" would deploy successfully and leave the application without
+	// the database the user asked for.
+	if springBootDefinitionValues.Database != nil {
+		switch *springBootDefinitionValues.Database {
+		case api_v0.DatabaseNone, api_v0.DatabasePostgres:
+		default:
+			multiError.AppendError(fmt.Errorf(
+				"invalid value in config for Database: %s: must be %s or %s",
+				*springBootDefinitionValues.Database,
+				api_v0.DatabaseNone, api_v0.DatabasePostgres,
+			))
+		}
+	}
+
+	// the probes ask for this path over HTTP. A value without a leading slash
+	// is rejected by the kube API when the manifest is applied, which is well
+	// after the definition was accepted.
+	if springBootDefinitionValues.HealthPath != nil &&
+		!strings.HasPrefix(*springBootDefinitionValues.HealthPath, "/") {
+		multiError.AppendError(fmt.Errorf(
+			"invalid value in config for HealthPath: %s: must start with /",
+			*springBootDefinitionValues.HealthPath,
+		))
+	}
 
 	return multiError.Error()
 }

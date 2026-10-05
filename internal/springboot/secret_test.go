@@ -54,7 +54,7 @@ func TestSecretKeysMatchTheManifest(t *testing.T) {
 	require.NoError(t, err)
 
 	in := defaultInput()
-	in.database = DatabasePostgres
+	in.database = v0.DatabasePostgres
 	doc, err := springBootYaml(in)
 	require.NoError(t, err)
 
@@ -97,11 +97,11 @@ func containerIn(t *testing.T, doc, deploymentName, containerName string) map[st
 // is applied - or one built in a test - has a nil field, and treating nil as
 // "deploy postgres" would create a database the manifest never referenced.
 func TestDefinitionDatabase(t *testing.T) {
-	assert.Equal(t, DatabaseNone, definitionDatabase(&v0.SpringBootDefinition{}))
+	assert.Equal(t, v0.DatabaseNone, definitionDatabase(&v0.SpringBootDefinition{}))
 
-	postgres := DatabasePostgres
+	postgres := v0.DatabasePostgres
 	assert.Equal(
-		t, DatabasePostgres,
+		t, v0.DatabasePostgres,
 		definitionDatabase(&v0.SpringBootDefinition{Database: &postgres}),
 	)
 }

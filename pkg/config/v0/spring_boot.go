@@ -4,6 +4,7 @@ package v0
 
 import (
 	"fmt"
+	tpconfig_v0 "github.com/threeport/threeport/pkg/config/v0"
 	util "github.com/threeport/threeport/pkg/util/v0"
 	"net/http"
 )
@@ -20,9 +21,25 @@ type SpringBootConfig struct {
 // SpringBootDefinition and SpringBootInstance API objects
 // together with a single operation.
 type SpringBootValues struct {
-	// TODO: add fields needed for user to manage a SpringBootDefinition and SpringBootInstance together
+	// Name is used for both the definition and the instance: a defined instance
+	// is the pair that shares a name.
 	Name *string
-	Age  *string
+
+	// definition attributes
+	Image       *string
+	Profile     *string
+	ServerPort  *int
+	JavaOpts    *string
+	Environment *string
+	Replicas    *int
+	Database    *string
+	HealthPath  *string
+
+	// instance attributes
+	KubernetesRuntimeInstance *tpconfig_v0.KubernetesRuntimeInstanceValues
+	SubDomain                 *string
+
+	Age *string
 }
 
 // Get gets a spring boot definition and instance from the Threeport API.
@@ -64,8 +81,8 @@ func (s *SpringBootConfig) Create(
 	// execute create operations
 	if err := operations.Create(); err != nil {
 		return nil, fmt.Errorf(
-			"failed to execute create operations for spring boot defined instance with name %s: %w",
-			*s.SpringBoot.Name,
+			"failed to execute create operations for spring boot defined instance %s: %w",
+			springBootName(s.SpringBoot.Name),
 			err,
 		)
 	}
@@ -117,13 +134,24 @@ func (s *SpringBootConfig) Delete(
 	// execute delete operations
 	if err := operations.Delete(); err != nil {
 		return nil, fmt.Errorf(
-			"failed to execute delete operations for spring boot defined instance with name %s: %w",
-			*s.SpringBoot.Name,
+			"failed to execute delete operations for spring boot defined instance %s: %w",
+			springBootName(s.SpringBoot.Name),
 			err,
 		)
 	}
 
 	return nil, nil
+}
+
+// springBootName describes a config's name for an error message. Validate reports a
+// missing name, and these messages wrap the failure Validate returns, so the
+// name has to be readable even when it is the thing that is absent.
+func springBootName(name *string) string {
+	if name == nil {
+		return "with no name"
+	}
+
+	return fmt.Sprintf("with name %s", *name)
 }
 
 // GetOperations returns a slice of operations used to get, create, replace or delete
@@ -140,18 +168,25 @@ func (s *SpringBootConfig) GetOperations(
 	operations := util.Operations{}
 
 	// add spring boot definition operation
-	// TODO: add appropriate fields to definition values object
 	springBootDefinitionConfig := SpringBootDefinitionConfig{
 		SpringBootDefinition: SpringBootDefinitionValues{
-			Age:  springBootValues.Age,
-			Name: springBootValues.Name,
+			Name:        springBootValues.Name,
+			Image:       springBootValues.Image,
+			Profile:     springBootValues.Profile,
+			ServerPort:  springBootValues.ServerPort,
+			JavaOpts:    springBootValues.JavaOpts,
+			Environment: springBootValues.Environment,
+			Replicas:    springBootValues.Replicas,
+			Database:    springBootValues.Database,
+			HealthPath:  springBootValues.HealthPath,
+			Age:         springBootValues.Age,
 		},
 	}
 	operations.AppendOperation(util.Operation{
 		Create: func() error {
 			springBootDefinition, err := springBootDefinitionConfig.Create(apiClient, apiEndpoint)
 			if err != nil {
-				return fmt.Errorf("failed to create spring boot definition with name %s: %w", *springBootValues.Name, err)
+				return fmt.Errorf("failed to create spring boot definition %s: %w", springBootName(springBootValues.Name), err)
 			}
 			operatedSpringBootDefinitions = append(operatedSpringBootDefinitions, *springBootDefinition)
 			return nil
@@ -159,7 +194,7 @@ func (s *SpringBootConfig) GetOperations(
 		Delete: func() error {
 			_, err = springBootDefinitionConfig.Delete(apiClient, apiEndpoint)
 			if err != nil {
-				return fmt.Errorf("failed to delete spring boot definition with name %s: %w", *springBootValues.Name, err)
+				return fmt.Errorf("failed to delete spring boot definition %s: %w", springBootName(springBootValues.Name), err)
 			}
 			return nil
 		},
@@ -182,19 +217,22 @@ func (s *SpringBootConfig) GetOperations(
 		},
 	})
 
-	// add spring boot instance operation
-	// TODO: add appropriate fields to instance values object
+	// add spring boot instance operation. The instance points at the definition the
+	// operation above creates, which carries the same name.
 	springBootInstanceConfig := SpringBootInstanceConfig{
 		SpringBootInstance: SpringBootInstanceValues{
-			Age:  springBootValues.Age,
-			Name: springBootValues.Name,
+			Name:                      springBootValues.Name,
+			KubernetesRuntimeInstance: springBootValues.KubernetesRuntimeInstance,
+			SubDomain:                 springBootValues.SubDomain,
+			SpringBootDefinition:      &SpringBootDefinitionValues{Name: springBootValues.Name},
+			Age:                       springBootValues.Age,
 		},
 	}
 	operations.AppendOperation(util.Operation{
 		Create: func() error {
 			springBootInstance, err := springBootInstanceConfig.Create(apiClient, apiEndpoint)
 			if err != nil {
-				return fmt.Errorf("failed to create spring boot instance with name %s: %w", *springBootValues.Name, err)
+				return fmt.Errorf("failed to create spring boot instance %s: %w", springBootName(springBootValues.Name), err)
 			}
 			operatedSpringBootInstances = append(operatedSpringBootInstances, *springBootInstance)
 			return nil
@@ -202,7 +240,7 @@ func (s *SpringBootConfig) GetOperations(
 		Delete: func() error {
 			_, err = springBootInstanceConfig.Delete(apiClient, apiEndpoint)
 			if err != nil {
-				return fmt.Errorf("failed to delete spring boot instance with name %s: %w", *springBootValues.Name, err)
+				return fmt.Errorf("failed to delete spring boot instance %s: %w", springBootName(springBootValues.Name), err)
 			}
 			return nil
 		},
@@ -236,17 +274,37 @@ func mapToSpringBootDefinedInstances(
 ) *[]SpringBootConfig {
 	var springBootConfigs []SpringBootConfig
 	for _, inst := range *springBootInstances {
+		// an instance with no name or no definition is not half of a defined
+		// instance, and the comparisons below would dereference nil
+		if inst.SpringBootInstance.Name == nil ||
+			inst.SpringBootInstance.SpringBootDefinition == nil ||
+			inst.SpringBootInstance.SpringBootDefinition.Name == nil {
+			continue
+		}
+
 		for _, def := range *springBootDefinitions {
+			if def.SpringBootDefinition.Name == nil {
+				continue
+			}
 			instName := *inst.SpringBootInstance.Name
 			defName := *def.SpringBootDefinition.Name
 			// a defined instance must have matching names for definition and instance
 			// and the definition must be associated with the instance
 			if instName == defName && *inst.SpringBootInstance.SpringBootDefinition.Name == *def.SpringBootDefinition.Name {
-				// TODO: add fields needed for user to manage a SpringBootDefinition and SpringBootInstance together
 				springBootConfig := SpringBootConfig{
 					SpringBoot: SpringBootValues{
-						Age:  inst.SpringBootInstance.Age,
-						Name: inst.SpringBootInstance.Name,
+						Name:                      inst.SpringBootInstance.Name,
+						Image:                     def.SpringBootDefinition.Image,
+						Profile:                   def.SpringBootDefinition.Profile,
+						ServerPort:                def.SpringBootDefinition.ServerPort,
+						JavaOpts:                  def.SpringBootDefinition.JavaOpts,
+						Environment:               def.SpringBootDefinition.Environment,
+						Replicas:                  def.SpringBootDefinition.Replicas,
+						Database:                  def.SpringBootDefinition.Database,
+						HealthPath:                def.SpringBootDefinition.HealthPath,
+						KubernetesRuntimeInstance: inst.SpringBootInstance.KubernetesRuntimeInstance,
+						SubDomain:                 inst.SpringBootInstance.SubDomain,
+						Age:                       inst.SpringBootInstance.Age,
 					},
 				}
 				springBootConfigs = append(springBootConfigs, springBootConfig)

@@ -6,7 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"sigs.k8s.io/yaml"
+	api_v0 "spring-boot-threeport-module/pkg/api/v0"
 )
 
 // docsIn parses every document in a multi-document YAML string. Splitting on
@@ -157,11 +159,11 @@ func defaultInput() springBootManifestInput {
 	return springBootManifestInput{
 		definitionName: "myapp",
 		image:          "myorg/myapp:v1",
-		serverPort:     DefaultServerPort,
+		serverPort:     api_v0.DefaultServerPort,
 		replicas:       1,
 		environment:    "dev",
-		database:       DatabaseNone,
-		healthPath:     DefaultHealthPath,
+		database:       api_v0.DatabaseNone,
+		healthPath:     api_v0.DefaultHealthPath,
 		dbStorageGb:    20,
 	}
 }
@@ -187,7 +189,7 @@ func TestSpringBootYaml_NoDatabase(t *testing.T) {
 // TestSpringBootYaml_WithPostgres covers the database being asked for.
 func TestSpringBootYaml_WithPostgres(t *testing.T) {
 	in := defaultInput()
-	in.database = DatabasePostgres
+	in.database = api_v0.DatabasePostgres
 
 	doc, err := springBootYaml(in)
 	require.NoError(t, err)
@@ -212,7 +214,7 @@ func TestSpringBootYaml_DatasourceOnlyWithDatabase(t *testing.T) {
 	assert.False(t, set, "no datasource is configured when no database is deployed")
 
 	in := defaultInput()
-	in.database = DatabasePostgres
+	in.database = api_v0.DatabasePostgres
 	withDb, err := springBootYaml(in)
 	require.NoError(t, err)
 
@@ -227,7 +229,7 @@ func TestSpringBootYaml_DatasourceOnlyWithDatabase(t *testing.T) {
 // credential.
 func TestSpringBootYaml_CredentialsComeFromTheSecret(t *testing.T) {
 	in := defaultInput()
-	in.database = DatabasePostgres
+	in.database = api_v0.DatabasePostgres
 
 	doc, err := springBootYaml(in)
 	require.NoError(t, err)
@@ -261,7 +263,7 @@ func TestSpringBootYaml_WaitsForDatabase(t *testing.T) {
 	assert.NotContains(t, podSpec, "initContainers", "nothing to wait for without a database")
 
 	in := defaultInput()
-	in.database = DatabasePostgres
+	in.database = api_v0.DatabasePostgres
 	withDb, err := springBootYaml(in)
 	require.NoError(t, err)
 
@@ -365,7 +367,7 @@ func TestSpringBootYaml_OptionalEnvOmitted(t *testing.T) {
 // manifest says, so declaring one would imply a control the module lacks.
 func TestSpringBootYaml_NoNamespaces(t *testing.T) {
 	in := defaultInput()
-	in.database = DatabasePostgres
+	in.database = api_v0.DatabasePostgres
 
 	doc, err := springBootYaml(in)
 	require.NoError(t, err)

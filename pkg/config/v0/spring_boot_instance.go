@@ -6,10 +6,21 @@ import (
 	errors "errors"
 	"fmt"
 	tpapi_v0 "github.com/threeport/threeport/pkg/api/v0"
+	tpclientlib "github.com/threeport/threeport/pkg/client/lib/v0"
+	tpclient_v0 "github.com/threeport/threeport/pkg/client/v0"
+	tpconfig_v0 "github.com/threeport/threeport/pkg/config/v0"
 	util "github.com/threeport/threeport/pkg/util/v0"
 	"net/http"
 	api_v0 "spring-boot-threeport-module/pkg/api/v0"
 	client_v0 "spring-boot-threeport-module/pkg/client/v0"
+)
+
+// deletionWaitAttempts and deletionWaitSeconds bound the wait for a deleted
+// instance to leave the API. They are variables rather than constants so a test
+// can observe a timeout without sitting through a minute of it.
+var (
+	deletionWaitAttempts = 60
+	deletionWaitSeconds  = 1
 )
 
 // SpringBootInstanceConfig is a config abstraction for the SpringBootInstance API object.
@@ -23,10 +34,19 @@ type SpringBootInstanceConfig struct {
 // SpringBootInstanceValues contains all the attributes needed to manage
 // the SpringBootInstance API object.
 type SpringBootInstanceValues struct {
-	// TODO: add config abstraction fields needed for user to manage a SpringBootInstance
-	Name                 *string
+	Name *string
+
+	// The Kubernetes runtime to deploy to, named rather than referenced by ID.
+	// Left unset, the control plane's default runtime is used, so a user with
+	// one cluster does not have to name it.
+	KubernetesRuntimeInstance *tpconfig_v0.KubernetesRuntimeInstanceValues
+
+	// When a DomainName is in use, the subdomain to reach this instance on.
+	SubDomain *string
+
 	SpringBootDefinition *SpringBootDefinitionValues
-	Age                  *string
+
+	Age *string
 }
 
 // Get gets spring boot instances from the Threeport API.
@@ -57,14 +77,67 @@ func (s *SpringBootInstanceConfig) Get(
 		springBootInstances = allSpringBootInstances
 	}
 
-	// assemble config objects from API objects
+	// assemble config objects from API objects. Instances commonly share a
+	// runtime and a definition, so resolved names are kept rather than fetched
+	// again for every row.
+	kubernetesRuntimeNames := make(map[uint]*string)
+	springBootDefinitionNames := make(map[uint]*string)
+
 	var springBootInstanceConfigs []SpringBootInstanceConfig
 	for _, springBootInstance := range *springBootInstances {
-		// TODO: add config abstraction fields needed for user to manage a SpringBootInstance
+		// the runtime and definition are foreign keys on the API object; the
+		// config abstraction exists so the user sees names instead
+		var kubernetesRuntimeInstanceValues *tpconfig_v0.KubernetesRuntimeInstanceValues
+		if springBootInstance.KubernetesRuntimeInstanceID != nil {
+			id := *springBootInstance.KubernetesRuntimeInstanceID
+			name, cached := kubernetesRuntimeNames[id]
+			if !cached {
+				kubernetesRuntimeInstance, err := tpclient_v0.GetKubernetesRuntimeInstanceByID(
+					apiClient,
+					apiEndpoint,
+					id,
+				)
+				if err != nil {
+					return nil, fmt.Errorf(
+						"failed to get kubernetes runtime instance with ID %d: %w",
+						id, err,
+					)
+				}
+				name = kubernetesRuntimeInstance.Name
+				kubernetesRuntimeNames[id] = name
+			}
+			kubernetesRuntimeInstanceValues = &tpconfig_v0.KubernetesRuntimeInstanceValues{Name: name}
+		}
+
+		var springBootDefinitionValues *SpringBootDefinitionValues
+		if springBootInstance.SpringBootDefinitionID != nil {
+			id := *springBootInstance.SpringBootDefinitionID
+			name, cached := springBootDefinitionNames[id]
+			if !cached {
+				springBootDefinition, err := client_v0.GetSpringBootDefinitionByID(
+					apiClient,
+					apiEndpoint,
+					id,
+				)
+				if err != nil {
+					return nil, fmt.Errorf(
+						"failed to get spring boot definition with ID %d: %w",
+						id, err,
+					)
+				}
+				name = springBootDefinition.Name
+				springBootDefinitionNames[id] = name
+			}
+			springBootDefinitionValues = &SpringBootDefinitionValues{Name: name}
+		}
+
 		springBootInstanceConfig := SpringBootInstanceConfig{
 			SpringBootInstance: SpringBootInstanceValues{
-				Age:  util.Ptr(util.GetAgeFormatted(springBootInstance.CreatedAt)),
-				Name: springBootInstance.Name,
+				Name:                      springBootInstance.Name,
+				KubernetesRuntimeInstance: kubernetesRuntimeInstanceValues,
+				SubDomain:                 springBootInstance.SubDomain,
+				SpringBootDefinition:      springBootDefinitionValues,
+				Age:                       util.Ptr(util.GetAgeFormatted(springBootInstance.CreatedAt)),
 			},
 		}
 		springBootInstanceConfigs = append(springBootInstanceConfigs, springBootInstanceConfig)
@@ -82,15 +155,42 @@ func (s *SpringBootInstanceConfig) Create(
 
 	// validate config
 	if err := s.Validate(); err != nil {
-		return nil, fmt.Errorf("failed to validate values for spring boot instance with name %s: %w", *springBootInstanceValues.Name, err)
+		// see the note in SpringBootDefinitionConfig.Create: a missing name is what
+		// Validate reports, so it cannot be read to describe the failure
+		return nil, fmt.Errorf("failed to validate values for spring boot instance: %w", err)
+	}
+
+	// resolve the runtime and definition the config names into the foreign keys
+	// the API object carries
+	kubernetesRuntimeInstance, err := getKubernetesRuntimeInstanceByNameOrDefault(
+		apiClient,
+		apiEndpoint,
+		springBootInstanceValues.KubernetesRuntimeInstance,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get kubernetes runtime instance: %w", err)
+	}
+
+	springBootDefinition, err := client_v0.GetSpringBootDefinitionByName(
+		apiClient,
+		apiEndpoint,
+		*springBootInstanceValues.SpringBootDefinition.Name,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to find spring boot definition with name %s: %w",
+			*springBootInstanceValues.SpringBootDefinition.Name, err,
+		)
 	}
 
 	// construct spring boot instance object
-	// TODO: add API object fields as needed for SpringBootInstance
 	springBootInstance := api_v0.SpringBootInstance{
 		Instance: tpapi_v0.Instance{
 			Name: springBootInstanceValues.Name,
 		},
+		KubernetesRuntimeInstanceID: kubernetesRuntimeInstance.ID,
+		SubDomain:                   springBootInstanceValues.SubDomain,
+		SpringBootDefinitionID:      springBootDefinition.ID,
 	}
 
 	// create spring boot instance
@@ -104,11 +204,15 @@ func (s *SpringBootInstanceConfig) Create(
 	}
 
 	// construct spring boot instance config
-	// TODO: add config abstraction fields needed for user to manage a SpringBootInstance
 	createdSpringBootInstanceConfig := &SpringBootInstanceConfig{
 		SpringBootInstance: SpringBootInstanceValues{
-			Age:  util.Ptr(util.GetAgeFormatted(createdSpringBootInstance.CreatedAt)),
 			Name: createdSpringBootInstance.Name,
+			KubernetesRuntimeInstance: &tpconfig_v0.KubernetesRuntimeInstanceValues{
+				Name: kubernetesRuntimeInstance.Name,
+			},
+			SubDomain:            createdSpringBootInstance.SubDomain,
+			SpringBootDefinition: &SpringBootDefinitionValues{Name: springBootDefinition.Name},
+			Age:                  util.Ptr(util.GetAgeFormatted(createdSpringBootInstance.CreatedAt)),
 		},
 	}
 
@@ -141,8 +245,41 @@ func (s *SpringBootInstanceConfig) Replace(
 		return nil, fmt.Errorf("failed to find spring boot instance with name %s: %w", name, err)
 	}
 
-	// construct updated spring boot instance object
-	// TODO: add API object fields as needed for SpringBootInstance
+	// resolve the names the config carries into foreign keys. Unlike create,
+	// this keeps the runtime the instance is already on rather than falling back
+	// to the default, which would move the workload to another cluster on an
+	// edit to an unrelated field.
+	kubernetesRuntimeInstance, moved, err := getKubernetesRuntimeInstanceForReplace(
+		apiClient,
+		apiEndpoint,
+		springBootInstanceValues.KubernetesRuntimeInstance,
+		existingSpringBootInstance.KubernetesRuntimeInstanceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get kubernetes runtime instance: %w", err)
+	}
+	if moved {
+		return nil, fmt.Errorf(
+			"a spring boot instance may not be moved from its current runtime to %s - create a new instance there instead",
+			*springBootInstanceValues.KubernetesRuntimeInstance.Name,
+		)
+	}
+
+	springBootDefinition, err := client_v0.GetSpringBootDefinitionByName(
+		apiClient,
+		apiEndpoint,
+		*springBootInstanceValues.SpringBootDefinition.Name,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to find spring boot definition with name %s: %w",
+			*springBootInstanceValues.SpringBootDefinition.Name, err,
+		)
+	}
+
+	// construct updated spring boot instance object. This is a full replacement, so
+	// every field the user can set is sent rather than merged onto the existing
+	// object.
 	updatedSpringBootInstance := &api_v0.SpringBootInstance{
 		Common: tpapi_v0.Common{
 			ID: existingSpringBootInstance.ID,
@@ -150,6 +287,15 @@ func (s *SpringBootInstanceConfig) Replace(
 		Instance: tpapi_v0.Instance{
 			Name: springBootInstanceValues.Name,
 		},
+		KubernetesRuntimeInstanceID: kubernetesRuntimeInstance.ID,
+		SubDomain:                   springBootInstanceValues.SubDomain,
+		SpringBootDefinitionID:      springBootDefinition.ID,
+
+		// the workload instance is an owned relationship the reconciler sets,
+		// not something the user configures. A replacement that left it out
+		// would be asking the API to clear it, which it refuses because an owned
+		// relationship is immutable once set.
+		KubernetesWorkloadInstanceID: existingSpringBootInstance.KubernetesWorkloadInstanceID,
 	}
 
 	// replace spring boot instance
@@ -163,11 +309,15 @@ func (s *SpringBootInstanceConfig) Replace(
 	}
 
 	// construct updated spring boot instance config
-	// TODO: add config abstraction fields needed for user to manage a SpringBootInstance
 	updatedSpringBootInstanceConfig := &SpringBootInstanceConfig{
 		SpringBootInstance: SpringBootInstanceValues{
-			Age:  util.Ptr(util.GetAgeFormatted(replacedSpringBootInstance.CreatedAt)),
 			Name: replacedSpringBootInstance.Name,
+			KubernetesRuntimeInstance: &tpconfig_v0.KubernetesRuntimeInstanceValues{
+				Name: kubernetesRuntimeInstance.Name,
+			},
+			SubDomain:            replacedSpringBootInstance.SubDomain,
+			SpringBootDefinition: &SpringBootDefinitionValues{Name: springBootDefinition.Name},
+			Age:                  util.Ptr(util.GetAgeFormatted(replacedSpringBootInstance.CreatedAt)),
 		},
 	}
 
@@ -180,6 +330,12 @@ func (s *SpringBootInstanceConfig) Delete(
 	apiEndpoint string,
 ) (*SpringBootInstanceConfig, error) {
 	springBootInstanceValues := s.SpringBootInstance
+
+	// delete works by name, and unlike create it does not run Validate first,
+	// so the name is checked here rather than dereferenced blind
+	if springBootInstanceValues.Name == nil {
+		return nil, errors.New("missing required field in config: Name")
+	}
 
 	// get spring boot instance by name
 	springBootInstance, err := client_v0.GetSpringBootInstanceByName(
@@ -201,8 +357,34 @@ func (s *SpringBootInstanceConfig) Delete(
 		return nil, fmt.Errorf("failed to delete spring boot instance from Threeport API: %w", err)
 	}
 
+	// wait for the spring boot instance to be deleted. The API marks it for deletion
+	// and the reconciler tears the workload down before the row goes away, so
+	// returning immediately would let a caller deleting a defined instance try
+	// to remove the definition while this instance still refers to it - which
+	// the API refuses. Threeport's own instance configs wait the same way.
+	if err := util.Retry(deletionWaitAttempts, deletionWaitSeconds, func() error {
+		_, err := client_v0.GetSpringBootInstanceByName(apiClient, apiEndpoint, *springBootInstanceValues.Name)
+		if err == nil {
+			return errors.New("spring boot instance not deleted")
+		}
+
+		// only an explicit not found proves the row is gone. Any other error is
+		// the API failing to answer, which says nothing about the instance, and
+		// reading it as success would let a caller delete the definition while
+		// this instance still refers to it.
+		if errors.Is(err, tpclientlib.ErrObjectNotFound) {
+			return nil
+		}
+
+		return fmt.Errorf("failed to check whether the spring boot instance is deleted: %w", err)
+	}); err != nil {
+		return nil, fmt.Errorf(
+			"gave up waiting for spring boot instance %s to be deleted: %w",
+			*springBootInstanceValues.Name, err,
+		)
+	}
+
 	// construct deleted spring boot instance config
-	// TODO: add config abstraction fields needed for user to manage a SpringBootInstance
 	deletedSpringBootInstanceConfig := &SpringBootInstanceConfig{
 		SpringBootInstance: SpringBootInstanceValues{
 			Name: deletedSpringBootInstance.Name,
@@ -222,7 +404,11 @@ func (s *SpringBootInstanceConfig) Validate() error {
 		multiError.AppendError(errors.New("missing required field in config: Name"))
 	}
 
-	// TODO: add additional validation as needed
+	// an instance has nothing to deploy without a definition, and Create
+	// dereferences the name to look it up
+	if springBootInstanceValues.SpringBootDefinition == nil || springBootInstanceValues.SpringBootDefinition.Name == nil {
+		multiError.AppendError(errors.New("missing required field in config: SpringBootDefinition.Name"))
+	}
 
 	return multiError.Error()
 }

@@ -1,0 +1,28 @@
+# A Spring Boot definition on its own. Many instances can be deployed from one
+# definition, each in its own namespace with its own database credential.
+#
+#   tptctl spring-boot create spring-boot-definition -c samples/spring-boot-definition.yaml
+SpringBootDefinition:
+  Name: petclinic
+  Image: localhost:5001/spring-petclinic:v0.1.0
+  # deploys PostgreSQL alongside the application and points the datasource at
+  # it. Left out, the application runs on whatever database its image is built
+  # with, which for petclinic is an in-memory H2 that starts empty every time.
+  Database: postgres
+  # read as a comma separated list by Spring and not interpreted here.
+  # petclinic needs its postgres profile to pick up the datasource.
+  Profile: postgres
+  Environment: prod
+  # left unset, the environment decides: 3 for prod, 1 otherwise
+  Replicas: 2
+  # the port the image serves on. Left out, it defaults to 8080, which is what
+  # Spring Boot uses unless the project changed server.port
+  ServerPort: 8080
+  # where the probes look. Left out, it defaults to the Actuator health
+  # endpoint; an image built without the actuator has to point this somewhere
+  # that answers
+  HealthPath: /actuator/health
+  # passed to the JVM through JAVA_TOOL_OPTIONS. The JVM sizes its heap from
+  # the container's memory limit on its own, so this is only for when that
+  # default is wrong
+  JavaOpts: -Xmx512m

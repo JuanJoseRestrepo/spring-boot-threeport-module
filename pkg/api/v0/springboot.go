@@ -5,6 +5,23 @@ package v0
 
 import tpapi_v0 "github.com/threeport/threeport/pkg/api/v0"
 
+const (
+	// DatabaseNone and DatabasePostgres are the values SpringBootDefinition's
+	// Database field accepts. Unlike Django, a Spring Boot application does not
+	// need a database to start - an embedded one such as H2 is a normal way to
+	// run - so none is the default and PostgreSQL is deployed only when asked
+	// for.
+	DatabaseNone     = "none"
+	DatabasePostgres = "postgres"
+
+	// DefaultServerPort is the port Spring Boot serves on unless the project
+	// changed server.port.
+	DefaultServerPort = 8080
+
+	// DefaultHealthPath is where Spring Boot Actuator exposes health.
+	DefaultHealthPath = "/actuator/health"
+)
+
 type SpringBootDefinition struct {
 	tpapi_v0.Common         `swaggerignore:"true" mapstructure:",squash"`
 	tpapi_v0.Reconciliation `mapstructure:",squash"`

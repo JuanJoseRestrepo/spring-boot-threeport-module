@@ -119,7 +119,7 @@ func v0SpringBootInstanceCreated(
 	// waiting for a namespace matters: the requeue below exists to reach a
 	// cluster, and an instance that never needs to would otherwise be held back
 	// by a wait that can never be satisfied any sooner.
-	if definitionDatabase(springBootDefinition) != DatabasePostgres {
+	if definitionDatabase(springBootDefinition) != v0.DatabasePostgres {
 		return 0, nil
 	}
 
@@ -213,7 +213,7 @@ func v0SpringBootInstanceDeleted(
 // to the default the API applies when the field was never set.
 func definitionDatabase(springBootDefinition *v0.SpringBootDefinition) string {
 	if springBootDefinition.Database == nil {
-		return DatabaseNone
+		return v0.DatabaseNone
 	}
 
 	return *springBootDefinition.Database

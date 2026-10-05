@@ -38,19 +38,19 @@ func v0SpringBootDefinitionCreated(
 		replicas = *springBootDefinition.Replicas
 	}
 
-	serverPort := DefaultServerPort
+	serverPort := v0.DefaultServerPort
 	if springBootDefinition.ServerPort != nil {
 		serverPort = *springBootDefinition.ServerPort
 	}
 
-	healthPath := DefaultHealthPath
+	healthPath := v0.DefaultHealthPath
 	if springBootDefinition.HealthPath != nil {
 		healthPath = *springBootDefinition.HealthPath
 	}
 
 	// a Spring Boot application can run on an embedded database, so the module
 	// deploys one only when the definition asks for it
-	database := DatabaseNone
+	database := v0.DatabaseNone
 	if springBootDefinition.Database != nil {
 		database = *springBootDefinition.Database
 	}

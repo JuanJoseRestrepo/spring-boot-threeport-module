@@ -7,33 +7,13 @@ import (
 
 	kube "github.com/threeport/threeport/pkg/kube/v0"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	api_v0 "spring-boot-threeport-module/pkg/api/v0"
 )
 
 const (
-	// DatabaseNone and DatabasePostgres are the values the definition's
-	// Database field accepts. Unlike Django, a Spring Boot application does not
-	// need a database to start - an embedded one such as H2 is a normal way to
-	// run - so none is the default and PostgreSQL is deployed only when asked
-	// for.
-	DatabaseNone     = "none"
-	DatabasePostgres = "postgres"
-
 	// postgresImage is the database the module deploys when the definition asks
 	// for one.
 	postgresImage = "postgres:16-alpine"
-
-	// DefaultServerPort is the port Spring Boot serves on unless the project
-	// changed server.port. The Service has to agree with whatever the image was
-	// built with, which is why it is a field on the definition rather than a
-	// constant used directly.
-	DefaultServerPort = 8080
-
-	// DefaultHealthPath is where Spring Boot Actuator exposes health. The
-	// probes ask for it rather than opening a TCP connection, because the
-	// listener accepts connections before the application context has finished
-	// refreshing: a tcpSocket check reports an application ready while its
-	// beans are still being wired.
-	DefaultHealthPath = "/actuator/health"
 
 	// postgresPort is the standard PostgreSQL port.
 	postgresPort = 5432
@@ -94,7 +74,7 @@ func springBootYaml(in springBootManifestInput) (string, error) {
 		}
 	}
 
-	withDatabase := in.database == DatabasePostgres
+	withDatabase := in.database == api_v0.DatabasePostgres
 	dbSecretName := DbSecretName(in.definitionName)
 	dbServiceName := fmt.Sprintf("%s-postgres", in.definitionName)
 
