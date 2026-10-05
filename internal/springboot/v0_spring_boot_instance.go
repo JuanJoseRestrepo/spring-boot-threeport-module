@@ -3,23 +3,175 @@
 package springboot
 
 import (
+	"errors"
+	"fmt"
+
 	logr "github.com/go-logr/logr"
+	tpapi "github.com/threeport/threeport/pkg/api/v0"
+	tpclientlib "github.com/threeport/threeport/pkg/client/lib/v0"
+	tpclient "github.com/threeport/threeport/pkg/client/v0"
 	controller "github.com/threeport/threeport/pkg/controller/v0"
+
 	v0 "spring-boot-threeport-module/pkg/api/v0"
+	client_v0 "spring-boot-threeport-module/pkg/client/v0"
 )
 
-// v0SpringBootInstanceCreated performs reconciliation when a v0 SpringBootInstance
-// has been created.
+// v0SpringBootInstanceCreated performs reconciliation when a v0
+// SpringBootInstance has been created.
+//
+// It deploys the workload definition its Spring Boot definition produced onto a
+// Kubernetes runtime, then records the resulting workload instance so the
+// attachment is created and the delete path has something to act on.
 func v0SpringBootInstanceCreated(
 	r *controller.Reconciler,
 	springBootInstance *v0.SpringBootInstance,
 	log *logr.Logger,
 ) (int64, error) {
+	springBootDefinition, err := client_v0.GetSpringBootDefinitionByID(
+		r.APIClient,
+		r.APIServer,
+		*springBootInstance.SpringBootDefinitionID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"failed to get spring boot definition with ID %d: %w",
+			*springBootInstance.SpringBootDefinitionID, err,
+		)
+	}
+
+	// the definition's reconciler creates the workload definition, and the two
+	// reconcile independently. Requeue rather than fail: this is ordering, not
+	// an error, and the definition may be moments behind.
+	if springBootDefinition.KubernetesWorkloadDefinitionID == nil {
+		log.Info("spring boot definition has no kubernetes workload definition yet, requeueing")
+		return 15, nil
+	}
+
+	runtimeInstanceId, err := resolveRuntimeInstanceId(r, springBootInstance)
+	if err != nil {
+		return 0, err
+	}
+
+	// reconciliation runs again on requeue, so an existing workload instance is
+	// adopted rather than duplicated
+	nameQuery := fmt.Sprintf("name=%s", *springBootInstance.Name)
+	existingWorkloadInstances, err := tpclient.GetKubernetesWorkloadInstancesByQueryString(
+		r.APIClient,
+		r.APIServer,
+		nameQuery,
+	)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"failed to check for kubernetes workload instances with name %s: %w",
+			*springBootInstance.Name, err,
+		)
+	}
+
+	var workloadInstance *tpapi.KubernetesWorkloadInstance
+	if len(*existingWorkloadInstances) == 0 {
+		created, err := tpclient.CreateKubernetesWorkloadInstance(
+			r.APIClient,
+			r.APIServer,
+			&tpapi.KubernetesWorkloadInstance{
+				Instance:                       tpapi.Instance{Name: springBootInstance.Name},
+				KubernetesRuntimeInstanceID:    runtimeInstanceId,
+				KubernetesWorkloadDefinitionID: springBootDefinition.KubernetesWorkloadDefinitionID,
+			},
+		)
+		if err != nil {
+			return 0, fmt.Errorf("failed to create kubernetes workload instance: %w", err)
+		}
+		workloadInstance = created
+	} else {
+		workloadInstance = &(*existingWorkloadInstances)[0]
+	}
+
+	// the runtime comes off the workload instance rather than from resolving
+	// the default again. A default can change between reconcile passes, and the
+	// workload is already deployed to whichever runtime it was created with:
+	// resolving again would put the secret in a cluster the workload is not in.
+	deployedRuntimeInstanceId := workloadInstance.KubernetesRuntimeInstanceID
+	if deployedRuntimeInstanceId == nil {
+		return 0, errors.New("kubernetes workload instance has no kubernetes runtime instance")
+	}
+
+	// the foreign keys are recorded before anything that can requeue. The
+	// workload instance already exists at this point, and the delete handler
+	// has nothing to clean up until its ID is on the spring boot instance: a
+	// delete arriving while the secret work is still retrying would otherwise
+	// leave the workload and its resources behind. Recording it also creates
+	// the attachments, and makes a resolved default runtime visible to the user
+	// rather than implicit.
+	if _, err := client_v0.UpdateSpringBootInstance(
+		r.APIClient,
+		r.APIServer,
+		&v0.SpringBootInstance{
+			Common:                       tpapi.Common{ID: springBootInstance.ID},
+			KubernetesRuntimeInstanceID:  deployedRuntimeInstanceId,
+			KubernetesWorkloadInstanceID: workloadInstance.ID,
+		},
+	); err != nil {
+		return 0, fmt.Errorf("failed to record kubernetes workload instance on spring boot instance: %w", err)
+	}
+
+	// an application running on an embedded database has no secret to create,
+	// and nothing in its manifest refers to one. Returning here rather than
+	// waiting for a namespace matters: the requeue below exists to reach a
+	// cluster, and an instance that never needs to would otherwise be held back
+	// by a wait that can never be satisfied any sooner.
+	if definitionDatabase(springBootDefinition) != DatabasePostgres {
+		return 0, nil
+	}
+
+	// the credential belongs to this instance, not to the definition that
+	// rendered the manifest: a definition can back many instances, and one
+	// database password across all of them means a leak from one reaches every
+	// other. Threeport names the namespace while it reconciles, so it cannot be
+	// known before the workload instance exists - requeue until it has one.
+	namespace, err := workloadNamespace(r, *workloadInstance.ID)
+	if err != nil {
+		return 0, err
+	}
+	if namespace == "" {
+		log.Info("workload instance has no namespace yet, requeueing to create the database secret")
+		return 10, nil
+	}
+
+	kubeClient, err := runtimeKubeClient(r, *deployedRuntimeInstanceId)
+	if err != nil {
+		return 0, err
+	}
+
+	// the pods reference this secret by name and stay in
+	// CreateContainerConfigError until it exists, then start on their own
+	dbSecretData, err := databaseSecretData()
+	if err != nil {
+		return 0, err
+	}
+
+	created, err := ensureSecret(
+		kubeClient,
+		namespace,
+		DbSecretName(*springBootDefinition.Name),
+		map[string]string{
+			"app.kubernetes.io/name":       "postgres",
+			"app.kubernetes.io/instance":   *springBootInstance.Name,
+			"app.kubernetes.io/managed-by": "spring-boot-threeport-module",
+		},
+		dbSecretData,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to ensure the database secret: %w", err)
+	}
+	if created {
+		log.Info("instance database secret created", "namespace", namespace)
+	}
+
 	return 0, nil
 }
 
-// v0SpringBootInstanceUpdated performs reconciliation when a v0 SpringBootInstance
-// has been updated.
+// v0SpringBootInstanceUpdated performs reconciliation when a v0
+// SpringBootInstance has been updated.
 func v0SpringBootInstanceUpdated(
 	r *controller.Reconciler,
 	springBootInstance *v0.SpringBootInstance,
@@ -28,12 +180,62 @@ func v0SpringBootInstanceUpdated(
 	return 0, nil
 }
 
-// v0SpringBootInstanceDeleted performs reconciliation when a v0 SpringBootInstance
-// has been deleted.
+// v0SpringBootInstanceDeleted performs reconciliation when a v0
+// SpringBootInstance has been deleted.
 func v0SpringBootInstanceDeleted(
 	r *controller.Reconciler,
 	springBootInstance *v0.SpringBootInstance,
 	log *logr.Logger,
 ) (int64, error) {
+	// an instance that never got as far as deploying has nothing to clean up
+	if springBootInstance.KubernetesWorkloadInstanceID == nil {
+		return 0, nil
+	}
+
+	if _, err := tpclient.DeleteKubernetesWorkloadInstance(
+		r.APIClient,
+		r.APIServer,
+		*springBootInstance.KubernetesWorkloadInstanceID,
+	); err != nil {
+		// already gone is the state we want, and happens on a retried delete
+		if !errors.Is(err, tpclientlib.ErrObjectNotFound) {
+			return 0, fmt.Errorf(
+				"failed to delete kubernetes workload instance with ID %d: %w",
+				*springBootInstance.KubernetesWorkloadInstanceID, err,
+			)
+		}
+	}
+
 	return 0, nil
+}
+
+// definitionDatabase returns the database a definition asks for, falling back
+// to the default the API applies when the field was never set.
+func definitionDatabase(springBootDefinition *v0.SpringBootDefinition) string {
+	if springBootDefinition.Database == nil {
+		return DatabaseNone
+	}
+
+	return *springBootDefinition.Database
+}
+
+// resolveRuntimeInstanceId returns the Kubernetes runtime to deploy to: the one
+// named on the instance, or the control plane's default when none is named.
+func resolveRuntimeInstanceId(
+	r *controller.Reconciler,
+	springBootInstance *v0.SpringBootInstance,
+) (*uint, error) {
+	if springBootInstance.KubernetesRuntimeInstanceID != nil {
+		return springBootInstance.KubernetesRuntimeInstanceID, nil
+	}
+
+	defaultRuntime, err := tpclient.GetDefaultKubernetesRuntimeInstance(r.APIClient, r.APIServer)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"no kubernetes runtime instance set on the spring boot instance and failed to get the default: %w",
+			err,
+		)
+	}
+
+	return defaultRuntime.ID, nil
 }
