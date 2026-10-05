@@ -16,6 +16,7 @@ require (
 	github.com/nats-io/nats.go v1.41.2
 	github.com/pressly/goose/v3 v3.24.1
 	github.com/spf13/cobra v1.8.1
+	github.com/stretchr/testify v1.11.1
 	github.com/threeport/threeport v0.6.1-0.20260911102532-8aa63ca0beb7
 	go.uber.org/zap v1.27.0
 	gorm.io/driver/postgres v1.5.11
@@ -167,6 +168,7 @@ require (
 	github.com/pjbgf/sha1cd v0.3.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pkg/term v1.1.0 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.20.5 // indirect
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.62.0 // indirect
@@ -191,7 +193,6 @@ require (
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/spf13/viper v1.19.0 // indirect
-	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/swaggo/echo-swagger v1.4.1 // indirect
 	github.com/swaggo/files/v2 v2.0.2 // indirect
