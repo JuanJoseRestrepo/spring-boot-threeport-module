@@ -73,7 +73,7 @@ the database credential, and only when a database is deployed.
 | Config abstractions (`pkg/config`) | done — see `samples/` |
 | tptctl plugin | generated, not yet exercised |
 | Sample application | `examples/spring-petclinic` — builds and runs, see below |
-| Verified against a live control plane | **not yet** |
+| Verified against a live control plane | yes — kind, see below |
 
 ## What has been verified
 
@@ -106,6 +106,34 @@ The image starts in about six seconds on a warm machine with no resource
 limits, which is not what a cold pod under a CPU limit will do. The
 `startupProbe` budget is five minutes for that reason.
 
+### Against a live control plane
+
+The module was installed into a Threeport control plane on kind and exercised
+end to end, both with and without a database.
+
+Without one, a defined instance deploys two resources — the application
+deployment and its service — and petclinic runs on its embedded H2: the service
+answers `{"status":"UP"}` on `/actuator/health`, serves the application, and
+returns the seeded records. The rendered probes are the ones the module
+intends: HTTP checks against `/actuator/health` on the container port, with the
+startup probe's sixty attempts at five seconds in front of the other two.
+
+With `Database: postgres`, the workload is six resources — the volume claim,
+the PostgreSQL deployment and service, and the application deployment and
+service. The Secret is not among them: the instance reconciler creates it in
+the instance's namespace, which Threeport names while reconciling. The pods sit
+in `CreateContainerConfigError` until it appears and then start unattended.
+The application connects to `jdbc:postgresql://petclinic-postgres:5432/springboot`
+— the module's service and database rather than petclinic's own defaults —
+creates its schema, and serves the seeded records from it.
+
+Deleting an instance removes the workload, its namespace and its volume, with
+no orphaned PersistentVolume left behind; deleting a definition removes the
+workload definition.
+
+One defect came out of those runs and is described below.
+
+
 ## Known limitations
 
 **Not yet run against a live control plane.** Everything above is covered by
@@ -114,6 +142,22 @@ API, but no `SpringBootInstance` has been deployed to a real cluster yet. The
 Django module turned up four defects that only appeared on a live run and none
 of them failed a test, so treat this as untested until that section says
 otherwise.
+
+**An application that initialises its schema on startup cannot be deployed at
+more than one replica against an empty database.** Petclinic does this rather
+than using Flyway or Liquibase, and PostgreSQL's `CREATE INDEX IF NOT EXISTS`
+checks the catalog and then creates, which is not atomic. Two replicas starting
+together both pass the check, and the second dies with `duplicate key value
+violates unique constraint "pg_class_relname_nsp_index"`. It recovers on
+restart, because the schema exists by the time it comes back, so the deployment
+does reach ready — but the first deploy is a crash loop, and `prod` defaults to
+three replicas, so most of them crash.
+
+The module cannot fix this: the schema initialisation happens inside the
+application, and a Deployment creates all of its replicas at once. An
+application using Flyway or Liquibase takes a lock and is safe at any replica
+count. `samples/spring-boot-definition.yaml` therefore asks for one replica and
+says why.
 
 **No managed database.** The database is always a containerized Postgres
 deployed alongside the application. The WordPress module offers a
