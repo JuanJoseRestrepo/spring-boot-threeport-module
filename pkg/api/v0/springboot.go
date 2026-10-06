@@ -54,13 +54,19 @@ type SpringBootDefinition struct {
 	// CPU and memory for the application container, as Kubernetes quantities:
 	// "500m", "1", "512Mi", "2Gi".
 	//
-	// MemoryLimit is worth setting on any Spring Boot application. Without it
-	// the JVM reads the node's memory rather than the container's, so a pod on
-	// a 64Gi node sizes its heap at 16Gi and several replicas between them
-	// claim an entitlement the node cannot honour. The module applies no
-	// default, because a limit below what an application needs turns a working
-	// deployment into a crash loop and only the application's owner knows what
-	// that figure is.
+	// Left unset, Environment decides: 512Mi/1Gi of memory and a 250m CPU
+	// request for development, 1Gi/2Gi and 500m for production. No CPU limit
+	// is ever defaulted, because a JVM is at its most CPU-hungry while its
+	// application context starts and a limit throttles it exactly then.
+	//
+	// A memory limit is defaulted because the alternative is worse than a
+	// wrong number: without one the JVM reads the node's memory rather than
+	// the container's, so a pod on a 64Gi node sizes its heap at 16Gi and
+	// several replicas between them claim an entitlement the node cannot
+	// honour. An application needing more than its environment's limit says
+	// so, and stating either memory field turns the defaulting off for memory
+	// entirely - CPU and memory are defaulted as units, so that a request
+	// cannot end up above a limit it was never meant to pair with.
 	CpuRequest    *string `validate:"optional"`
 	CpuLimit      *string `validate:"optional"`
 	MemoryRequest *string `validate:"optional"`

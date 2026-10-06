@@ -49,11 +49,13 @@ type SpringBootDefinitionValues struct {
 	JavaOpts *string
 
 	// CPU and memory for the application container, as Kubernetes quantities:
-	// "500m", "1", "512Mi", "2Gi". Left unset, nothing is requested or limited.
+	// "500m", "1", "512Mi", "2Gi".
 	//
-	// MemoryLimit is worth setting on any Spring Boot application: without it
-	// the JVM reads the node's memory rather than the container's, so a pod on
-	// a 64Gi node sizes its heap at 16Gi.
+	// Left unset, Environment decides: 512Mi/1Gi of memory and a 250m CPU
+	// request for development, 1Gi/2Gi and 500m for production, and no CPU
+	// limit in either. Stating either memory field turns the defaulting off
+	// for memory entirely, and likewise for CPU, so that a request cannot end
+	// up above a limit it was never meant to pair with.
 	CpuRequest    *string
 	CpuLimit      *string
 	MemoryRequest *string
@@ -347,15 +349,34 @@ func (s *SpringBootDefinitionConfig) Validate() error {
 		multiError.AppendError(errors.New("missing required field in config: Name"))
 	}
 
-	// the name is the app.kubernetes.io/instance label on every object the
-	// module renders, and also the prefix of the resource names, so it is
-	// subject to the same late failure the environment check prevents
+	// the name is used directly as a Service name, which is the strictest rule
+	// any of the rendered objects impose: a DNS-1035 label, so lowercase
+	// alphanumerics and dashes, starting with a letter. A label value would
+	// also accept "my_app", "my.app" and "MyApp", and Kubernetes refuses all
+	// three as Service names - so a definition the API accepted could never
+	// deploy. Satisfying this satisfies the label value rule as well, which is
+	// why there is only one check.
 	if springBootDefinitionValues.Name != nil {
-		if errs := validation.IsValidLabelValue(*springBootDefinitionValues.Name); len(errs) > 0 {
+		if errs := validation.IsDNS1035Label(*springBootDefinitionValues.Name); len(errs) > 0 {
 			multiError.AppendError(fmt.Errorf(
 				"invalid value in config for Name: %s: %s",
 				*springBootDefinitionValues.Name, strings.Join(errs, "; "),
 			))
+		}
+
+		// the database objects are named "<name>-postgres", so a name that is
+		// valid on its own can still be nine characters too long once the
+		// suffix is added. Checking the derived name rather than subtracting
+		// nine from the limit keeps the two from drifting apart.
+		if springBootDefinitionValues.Database != nil &&
+			*springBootDefinitionValues.Database == api_v0.DatabasePostgres {
+			derived := *springBootDefinitionValues.Name + "-postgres"
+			if errs := validation.IsDNS1035Label(derived); len(errs) > 0 {
+				multiError.AppendError(fmt.Errorf(
+					"invalid value in config for Name: %s: the database is named %s, which is not usable: %s",
+					*springBootDefinitionValues.Name, derived, strings.Join(errs, "; "),
+				))
+			}
 		}
 	}
 
@@ -429,9 +450,19 @@ func (s *SpringBootDefinitionConfig) Validate() error {
 		if quantity == nil {
 			continue
 		}
-		if _, err := resource.ParseQuantity(*quantity); err != nil {
+		parsed, err := resource.ParseQuantity(*quantity)
+		if err != nil {
 			multiError.AppendError(fmt.Errorf(
 				"invalid value in config for %s: %s: %w", field, *quantity, err,
+			))
+
+			continue
+		}
+		// ParseQuantity is happy with "-1Gi"; the kube API is not, and only
+		// says so when the manifest is applied
+		if parsed.Sign() < 0 {
+			multiError.AppendError(fmt.Errorf(
+				"invalid value in config for %s: %s: must not be negative", field, *quantity,
 			))
 		}
 	}

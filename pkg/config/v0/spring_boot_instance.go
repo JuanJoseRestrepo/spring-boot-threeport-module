@@ -11,6 +11,9 @@ import (
 	tpconfig_v0 "github.com/threeport/threeport/pkg/config/v0"
 	util "github.com/threeport/threeport/pkg/util/v0"
 	"net/http"
+	"strings"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 	api_v0 "spring-boot-threeport-module/pkg/api/v0"
 	client_v0 "spring-boot-threeport-module/pkg/client/v0"
 )
@@ -402,6 +405,20 @@ func (s *SpringBootInstanceConfig) Validate() error {
 	// ensure name is set
 	if springBootInstanceValues.Name == nil {
 		multiError.AppendError(errors.New("missing required field in config: Name"))
+	}
+
+	// the instance name becomes the Kubernetes workload instance's name, and
+	// Threeport builds the instance's namespace from it. A namespace is a
+	// DNS-1123 label, so a name Kubernetes cannot use leaves the workload with
+	// nowhere to be placed - reported here rather than when the namespace is
+	// created, which is after the instance was accepted.
+	if springBootInstanceValues.Name != nil {
+		if errs := validation.IsDNS1123Label(*springBootInstanceValues.Name); len(errs) > 0 {
+			multiError.AppendError(fmt.Errorf(
+				"invalid value in config for Name: %s: %s",
+				*springBootInstanceValues.Name, strings.Join(errs, "; "),
+			))
+		}
 	}
 
 	// an instance has nothing to deploy without a definition, and Create

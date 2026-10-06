@@ -6,7 +6,7 @@ SpringBoot:
   Name: petclinic
   # required: a Spring Boot project is packaged as a jar it builds itself, so
   # there is no canonical public image
-  Image: localhost:5001/spring-petclinic:v0.1.0
+  Image: localhost:5001/spring-petclinic:v0.2.0
   # only "prod" is special-cased, for replica and database storage sizing;
   # anything else gets the development defaults
   Environment: dev

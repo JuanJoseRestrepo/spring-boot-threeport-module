@@ -7,7 +7,7 @@
 # unpinned build is a different application every time and a failure could not
 # be told apart from a change upstream.
 #
-#   docker build -t localhost:5001/spring-petclinic:v0.1.0 examples/spring-petclinic
+#   docker build -t localhost:5001/spring-petclinic:v0.2.0 examples/spring-petclinic
 #
 # Pass --build-arg PETCLINIC_REF=<sha or tag> to build a different revision.
 

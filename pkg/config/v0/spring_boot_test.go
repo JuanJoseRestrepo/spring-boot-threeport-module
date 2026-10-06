@@ -3,6 +3,7 @@ package v0
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -47,6 +48,95 @@ func TestSpringBootDefinitionConfig_Validate(t *testing.T) {
 				Image: util.Ptr("myorg/myapp:v1"),
 			},
 			wantErr: "Name",
+		},
+		{
+			name: "an underscore is a valid label value and not a valid Service name",
+			values: SpringBootDefinitionValues{
+				Name:  util.Ptr("my_app"),
+				Image: util.Ptr("myorg/myapp:v1"),
+			},
+			wantErr: "Name",
+		},
+		{
+			name: "a dot is a valid label value and not a valid Service name",
+			values: SpringBootDefinitionValues{
+				Name:  util.Ptr("my.app"),
+				Image: util.Ptr("myorg/myapp:v1"),
+			},
+			wantErr: "Name",
+		},
+		{
+			name: "an upper case name is rejected",
+			values: SpringBootDefinitionValues{
+				Name:  util.Ptr("MyApp"),
+				Image: util.Ptr("myorg/myapp:v1"),
+			},
+			wantErr: "Name",
+		},
+		{
+			name: "a name starting with a digit is rejected",
+			values: SpringBootDefinitionValues{
+				Name:  util.Ptr("1app"),
+				Image: util.Ptr("myorg/myapp:v1"),
+			},
+			wantErr: "Name",
+		},
+		{
+			name: "a dash is fine",
+			values: SpringBootDefinitionValues{
+				Name:  util.Ptr("my-app"),
+				Image: util.Ptr("myorg/myapp:v1"),
+			},
+		},
+		{
+			name: "a name that only overflows once -postgres is added is rejected",
+			values: SpringBootDefinitionValues{
+				Name:     util.Ptr(strings.Repeat("a", 55)),
+				Image:    util.Ptr("myorg/myapp:v1"),
+				Database: util.Ptr(api_v0.DatabasePostgres),
+			},
+			wantErr: "-postgres",
+		},
+		{
+			name: "the same name is fine without a database",
+			values: SpringBootDefinitionValues{
+				Name:  util.Ptr(strings.Repeat("a", 55)),
+				Image: util.Ptr("myorg/myapp:v1"),
+			},
+		},
+		{
+			name: "54 characters still fits with -postgres",
+			values: SpringBootDefinitionValues{
+				Name:     util.Ptr(strings.Repeat("a", 54)),
+				Image:    util.Ptr("myorg/myapp:v1"),
+				Database: util.Ptr(api_v0.DatabasePostgres),
+			},
+		},
+		{
+			name: "a negative memory limit is rejected",
+			values: SpringBootDefinitionValues{
+				Name:        util.Ptr("myapp"),
+				Image:       util.Ptr("myorg/myapp:v1"),
+				MemoryLimit: util.Ptr("-1Gi"),
+			},
+			wantErr: "must not be negative",
+		},
+		{
+			name: "a negative cpu request is rejected",
+			values: SpringBootDefinitionValues{
+				Name:       util.Ptr("myapp"),
+				Image:      util.Ptr("myorg/myapp:v1"),
+				CpuRequest: util.Ptr("-100m"),
+			},
+			wantErr: "must not be negative",
+		},
+		{
+			name: "zero is not negative",
+			values: SpringBootDefinitionValues{
+				Name:       util.Ptr("myapp"),
+				Image:      util.Ptr("myorg/myapp:v1"),
+				CpuRequest: util.Ptr("0"),
+			},
 		},
 		{
 			name: "the environment has to be usable as a label value",
@@ -214,6 +304,14 @@ func TestSpringBootInstanceConfig_Validate(t *testing.T) {
 				Name:                 util.Ptr("myapp"),
 				SpringBootDefinition: &SpringBootDefinitionValues{Name: util.Ptr("myapp")},
 			},
+		},
+		{
+			name: "an instance name Kubernetes cannot use as a namespace is rejected",
+			values: SpringBootInstanceValues{
+				Name:                 util.Ptr("my_app"),
+				SpringBootDefinition: &SpringBootDefinitionValues{Name: util.Ptr("myapp")},
+			},
+			wantErr: "Name",
 		},
 		{
 			name:    "the definition is required",

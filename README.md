@@ -150,13 +150,6 @@ workload definition.
 
 ## Known limitations
 
-**Not yet run against a live control plane.** Everything above is covered by
-unit tests, including the manifests and the propagation of config values to the
-API, but no `SpringBootInstance` has been deployed to a real cluster yet. The
-Django module turned up four defects that only appeared on a live run and none
-of them failed a test, so treat this as untested until that section says
-otherwise.
-
 **An application that initialises its schema on startup cannot be deployed at
 more than one replica against an empty database.** This is a property of the
 application, not of the module. PostgreSQL's `CREATE INDEX IF NOT EXISTS`
@@ -273,8 +266,8 @@ The dev flow pulls from the local registry that `mage dev:localRegistryUp`
 starts on port 5001, not from `ImageNamespace`.
 
 ```bash
-docker build -t localhost:5001/spring-petclinic:v0.1.0 examples/spring-petclinic
-docker push localhost:5001/spring-petclinic:v0.1.0
+docker build -t localhost:5001/spring-petclinic:v0.2.0 examples/spring-petclinic
+docker push localhost:5001/spring-petclinic:v0.2.0
 ```
 
 The build compiles petclinic from source with Maven, so the first run downloads
