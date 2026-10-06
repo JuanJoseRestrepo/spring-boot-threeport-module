@@ -72,9 +72,11 @@ the database credential, and only when a database is deployed.
 | Definition reconciler | done |
 | Instance reconciler | done |
 | Config abstractions (`pkg/config`) | done — see `samples/` |
-| tptctl plugin | generated, not yet exercised |
+| tptctl plugin | `install`, `create`, `get` and `delete` exercised against a live control plane |
+| Multiple replicas | done — three verified serving together, see below |
 | Sample application | `examples/spring-petclinic` — builds and runs, see below |
 | Verified against a live control plane | yes — kind, see below |
+| `replace` | blocked on [threeport/threeport#573](https://github.com/threeport/threeport/issues/573) |
 
 ## What has been verified
 
@@ -93,10 +95,12 @@ This is why the module sets the generic `SPRING_DATASOURCE_*` names rather than
 the `POSTGRES_*` ones petclinic happens to read: the generic ones work for any
 Spring Boot application, and they win regardless.
 
-**The application creates its own schema.** Its `postgres` profile sets
-`spring.sql.init.mode=always`, and a run against an empty database produced all
-seven tables and loaded the seed data. There is nothing for a migration job to
-do, which is why the module has none.
+**The application creates its own schema**, so the module needs no migration
+job. Upstream petclinic does it from `spring.sql.init`, which produced all
+seven tables and the seed data against an empty database but is not safe to run
+from several replicas at once. The image the module ships therefore builds it
+with Flyway instead — see "Why the sample is patched" below — and a run against
+an empty database produces the same tables and data under a lock.
 
 **The health endpoint is real.** Petclinic includes
 `spring-boot-starter-actuator`, so `/actuator/health` answers
@@ -166,6 +170,16 @@ The module cannot fix it: the initialisation happens inside the application and
 a Deployment creates all of its replicas at once. An application using Flyway
 or Liquibase takes a database lock and is safe at any replica count, which is
 why the sample image builds petclinic with Flyway — see below.
+
+**No default is applied to the resource fields,** so an application deployed
+without a `MemoryLimit` gets a JVM sized from the node rather than the
+container. Defaulting one by `Environment`, the way replicas and database
+storage are defaulted, would fix that for every deployment that does not think
+about it — at the cost that an application needing more than the default would
+crash-loop where today it would merely over-claim. Which of those is the better
+failure is a decision for the project rather than this module, and it matters
+more now that multiple replicas are expected: three unbounded JVMs on one node
+size themselves for three quarters of its memory between them.
 
 **No managed database.** The database is always a containerized Postgres
 deployed alongside the application. The WordPress module offers a
