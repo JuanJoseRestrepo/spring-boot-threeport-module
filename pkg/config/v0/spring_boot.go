@@ -35,6 +35,12 @@ type SpringBootValues struct {
 	Database    *string
 	HealthPath  *string
 
+	// CPU and memory for the application container, as Kubernetes quantities
+	CpuRequest    *string
+	CpuLimit      *string
+	MemoryRequest *string
+	MemoryLimit   *string
+
 	// instance attributes
 	KubernetesRuntimeInstance *tpconfig_v0.KubernetesRuntimeInstanceValues
 	SubDomain                 *string
@@ -170,16 +176,20 @@ func (s *SpringBootConfig) GetOperations(
 	// add spring boot definition operation
 	springBootDefinitionConfig := SpringBootDefinitionConfig{
 		SpringBootDefinition: SpringBootDefinitionValues{
-			Name:        springBootValues.Name,
-			Image:       springBootValues.Image,
-			Profile:     springBootValues.Profile,
-			ServerPort:  springBootValues.ServerPort,
-			JavaOpts:    springBootValues.JavaOpts,
-			Environment: springBootValues.Environment,
-			Replicas:    springBootValues.Replicas,
-			Database:    springBootValues.Database,
-			HealthPath:  springBootValues.HealthPath,
-			Age:         springBootValues.Age,
+			Name:          springBootValues.Name,
+			Image:         springBootValues.Image,
+			Profile:       springBootValues.Profile,
+			ServerPort:    springBootValues.ServerPort,
+			JavaOpts:      springBootValues.JavaOpts,
+			CpuRequest:    springBootValues.CpuRequest,
+			CpuLimit:      springBootValues.CpuLimit,
+			MemoryRequest: springBootValues.MemoryRequest,
+			MemoryLimit:   springBootValues.MemoryLimit,
+			Environment:   springBootValues.Environment,
+			Replicas:      springBootValues.Replicas,
+			Database:      springBootValues.Database,
+			HealthPath:    springBootValues.HealthPath,
+			Age:           springBootValues.Age,
 		},
 	}
 	operations.AppendOperation(util.Operation{
@@ -298,6 +308,10 @@ func mapToSpringBootDefinedInstances(
 						Profile:                   def.SpringBootDefinition.Profile,
 						ServerPort:                def.SpringBootDefinition.ServerPort,
 						JavaOpts:                  def.SpringBootDefinition.JavaOpts,
+						CpuRequest:                def.SpringBootDefinition.CpuRequest,
+						CpuLimit:                  def.SpringBootDefinition.CpuLimit,
+						MemoryRequest:             def.SpringBootDefinition.MemoryRequest,
+						MemoryLimit:               def.SpringBootDefinition.MemoryLimit,
 						Environment:               def.SpringBootDefinition.Environment,
 						Replicas:                  def.SpringBootDefinition.Replicas,
 						Database:                  def.SpringBootDefinition.Database,

@@ -54,15 +54,19 @@ func TestSpringBootConfig_Create_CarriesEveryField(t *testing.T) {
 
 	config := SpringBootConfig{
 		SpringBoot: SpringBootValues{
-			Name:        util.Ptr("petclinic"),
-			Image:       util.Ptr("myorg/petclinic:v1"),
-			Profile:     util.Ptr("postgres,prod"),
-			ServerPort:  util.Ptr(9000),
-			JavaOpts:    util.Ptr("-Xmx512m"),
-			Environment: util.Ptr("prod"),
-			Replicas:    util.Ptr(2),
-			Database:    util.Ptr(api_v0.DatabasePostgres),
-			HealthPath:  util.Ptr("/healthz"),
+			Name:          util.Ptr("petclinic"),
+			Image:         util.Ptr("myorg/petclinic:v1"),
+			Profile:       util.Ptr("postgres,prod"),
+			ServerPort:    util.Ptr(9000),
+			JavaOpts:      util.Ptr("-Xmx512m"),
+			Environment:   util.Ptr("prod"),
+			Replicas:      util.Ptr(2),
+			Database:      util.Ptr(api_v0.DatabasePostgres),
+			HealthPath:    util.Ptr("/healthz"),
+			CpuRequest:    util.Ptr("250m"),
+			CpuLimit:      util.Ptr("1"),
+			MemoryRequest: util.Ptr("512Mi"),
+			MemoryLimit:   util.Ptr("2Gi"),
 		},
 	}
 
@@ -71,15 +75,19 @@ func TestSpringBootConfig_Create_CarriesEveryField(t *testing.T) {
 	require.NotNil(t, sentDefinition, "the definition was never posted")
 
 	for field, want := range map[string]interface{}{
-		"Name":        "petclinic",
-		"Image":       "myorg/petclinic:v1",
-		"Profile":     "postgres,prod",
-		"ServerPort":  float64(9000),
-		"JavaOpts":    "-Xmx512m",
-		"Environment": "prod",
-		"Replicas":    float64(2),
-		"Database":    api_v0.DatabasePostgres,
-		"HealthPath":  "/healthz",
+		"Name":          "petclinic",
+		"Image":         "myorg/petclinic:v1",
+		"Profile":       "postgres,prod",
+		"ServerPort":    float64(9000),
+		"JavaOpts":      "-Xmx512m",
+		"Environment":   "prod",
+		"Replicas":      float64(2),
+		"Database":      api_v0.DatabasePostgres,
+		"HealthPath":    "/healthz",
+		"CpuRequest":    "250m",
+		"CpuLimit":      "1",
+		"MemoryRequest": "512Mi",
+		"MemoryLimit":   "2Gi",
 	} {
 		assert.Equal(
 			t, want, sentDefinition[field],

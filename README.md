@@ -19,7 +19,8 @@ configured. It is the reusable part: one definition can back many instances.
 | `Image` | yes | The application's container image. A Spring Boot project is packaged as a jar it builds itself, so there is no canonical public image and the module cannot deploy anything without one. |
 | `Profile` | no | Passed as `SPRING_PROFILES_ACTIVE`. Spring reads it as a comma separated list; the module does not interpret it. |
 | `ServerPort` | no | The port the image serves on. Defaults to `8080`, which is Spring Boot's default unless the project changed `server.port`. The Service targets whatever this says. |
-| `JavaOpts` | no | Passed as `JAVA_TOOL_OPTIONS`, e.g. `-Xmx512m`. |
+| `JavaOpts` | no | Passed as `JAVA_TOOL_OPTIONS`, e.g. `-Xmx512m`. A JVM sizes its heap at a quarter of the memory it can see, so `MemoryLimit` is the usual way to size it and this is for when that quarter is the wrong fraction. |
+| `CpuRequest`, `CpuLimit`, `MemoryRequest`, `MemoryLimit` | no | Kubernetes quantities for the application container. `MemoryLimit` is worth setting on any Spring Boot application: without it the JVM reads the node's memory rather than the container's, so a pod on a 64Gi node sizes its heap at 16Gi. No default is applied — a limit below what an application needs turns a working deployment into a crash loop, and only its owner knows that figure. |
 | `Database` | no | `none` or `postgres`. Defaults to `none`. |
 | `HealthPath` | no | The path the probes ask for. Defaults to `/actuator/health`. |
 | `Environment` | no | Drives replica and storage defaults. Defaults to `dev`. |
@@ -127,6 +128,12 @@ The application connects to `jdbc:postgresql://petclinic-postgres:5432/springboo
 — the module's service and database rather than petclinic's own defaults —
 creates its schema, and serves the seeded records from it.
 
+With `MemoryLimit: 1Gi`, the JVM inside the pod reports a 256MB maximum heap —
+a quarter of the limit. The same image with no limit reports 2984MB, a quarter
+of the node's memory, which is what every Spring Boot pod gets when the module
+is given no limit to apply. The limits reach the application container only:
+PostgreSQL keeps its own sizing.
+
 At three replicas, all three start together against an empty database and none
 of them restarts: one applies the Flyway migrations and the other two log
 `Schema "public" is up to date`. The history table holds each migration once
@@ -180,10 +187,20 @@ would hand the application a password the running database does not accept.
 Rotating it means deleting the Secret, the volume and the workload.
 
 **A replace updates the API object but not the running workload.** Both update
-reconcilers are unimplemented stubs, so a replace changes the stored definition
-and reports success while the deployment goes on running what the previous
-definition rendered. Changing a deployed application means deleting and
-recreating it.
+reconcilers are unimplemented stubs, and that is a limitation of Threeport
+rather than a gap here: updating a `KubernetesWorkloadDefinition`'s
+`YAMLDocument` has no effect on anything. The YAML is parsed into resource
+definitions once, when the workload definition is created, and nothing reads it
+again — so a change reaches neither the instances already running nor the ones
+created afterwards. Every module that renders manifests into a workload
+definition inherits the same ceiling; the Django module's update reconcilers
+are stubs for the same reason. Filed as
+[threeport/threeport#573](https://github.com/threeport/threeport/issues/573).
+
+A module can work around it by rewriting each instance's
+`KubernetesWorkloadResourceInstance` directly, but that has every module
+reimplementing what the workload controller should do, so this one does not.
+Changing a deployed application means deleting and recreating it.
 
 **`SubDomain` is stored but not acted on.** Reaching an instance by subdomain
 needs a gateway and a domain name attached to it, which is a second set of
@@ -258,6 +275,25 @@ tptctl spring-boot install -r localhost:5001
 
 `-r localhost:5001` matters: the install defaults to `ImageNamespace`, and the
 dev images are in the local registry.
+
+### A note on rebuilding
+
+The images are rebuilt under the same `v0.0.1-dev` tag, and the generated
+deployments use `imagePullPolicy: IfNotPresent`, so the kubelet goes on serving
+the cached image and a change appears not to have taken effect. This bites
+twice: once for the API server, where a new field comes back as `Unsupported
+fields are not allowed`, and once for the database migrator, which runs as an
+init container and has its own pull policy — a new migration silently does not
+run and the next write fails with `column "..." does not exist`.
+
+Patch both before concluding anything about a rebuild:
+
+```bash
+kubectl patch deploy threeport-spring-boot-api-server -n threeport-spring-boot --type=json \
+  -p='[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Always"},
+       {"op":"replace","path":"/spec/template/spec/initContainers/0/imagePullPolicy","value":"Always"},
+       {"op":"replace","path":"/spec/template/spec/initContainers/1/imagePullPolicy","value":"Always"}]'
+```
 
 ### 3. Deploy the application
 

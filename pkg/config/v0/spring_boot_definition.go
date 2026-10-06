@@ -7,6 +7,7 @@ import (
 	"fmt"
 	tpapi_v0 "github.com/threeport/threeport/pkg/api/v0"
 	util "github.com/threeport/threeport/pkg/util/v0"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"net/http"
 	api_v0 "spring-boot-threeport-module/pkg/api/v0"
@@ -41,8 +42,22 @@ type SpringBootDefinitionValues struct {
 	// server.port.
 	ServerPort *int
 
-	// Options passed to the JVM through JAVA_TOOL_OPTIONS, e.g. -Xmx512m.
+	// Options passed to the JVM through JAVA_TOOL_OPTIONS, e.g. -Xmx512m. A JVM
+	// in a container sizes its heap at a quarter of the memory it can see, so
+	// MemoryLimit below is the usual way to size it and this is for when that
+	// quarter is the wrong fraction.
 	JavaOpts *string
+
+	// CPU and memory for the application container, as Kubernetes quantities:
+	// "500m", "1", "512Mi", "2Gi". Left unset, nothing is requested or limited.
+	//
+	// MemoryLimit is worth setting on any Spring Boot application: without it
+	// the JVM reads the node's memory rather than the container's, so a pod on
+	// a 64Gi node sizes its heap at 16Gi.
+	CpuRequest    *string
+	CpuLimit      *string
+	MemoryRequest *string
+	MemoryLimit   *string
 
 	// The environment the definition is deployed for. It becomes a Kubernetes
 	// label and picks the replica and storage defaults; only "prod" is
@@ -98,16 +113,20 @@ func (s *SpringBootDefinitionConfig) Get(
 	for _, springBootDefinition := range *springBootDefinitions {
 		springBootDefinitionConfig := SpringBootDefinitionConfig{
 			SpringBootDefinition: SpringBootDefinitionValues{
-				Name:        springBootDefinition.Name,
-				Image:       springBootDefinition.Image,
-				Profile:     springBootDefinition.Profile,
-				ServerPort:  springBootDefinition.ServerPort,
-				JavaOpts:    springBootDefinition.JavaOpts,
-				Environment: springBootDefinition.Environment,
-				Replicas:    springBootDefinition.Replicas,
-				Database:    springBootDefinition.Database,
-				HealthPath:  springBootDefinition.HealthPath,
-				Age:         util.Ptr(util.GetAgeFormatted(springBootDefinition.CreatedAt)),
+				Name:          springBootDefinition.Name,
+				Image:         springBootDefinition.Image,
+				Profile:       springBootDefinition.Profile,
+				ServerPort:    springBootDefinition.ServerPort,
+				JavaOpts:      springBootDefinition.JavaOpts,
+				CpuRequest:    springBootDefinition.CpuRequest,
+				CpuLimit:      springBootDefinition.CpuLimit,
+				MemoryRequest: springBootDefinition.MemoryRequest,
+				MemoryLimit:   springBootDefinition.MemoryLimit,
+				Environment:   springBootDefinition.Environment,
+				Replicas:      springBootDefinition.Replicas,
+				Database:      springBootDefinition.Database,
+				HealthPath:    springBootDefinition.HealthPath,
+				Age:           util.Ptr(util.GetAgeFormatted(springBootDefinition.CreatedAt)),
 			},
 		}
 		springBootDefinitionConfigs = append(springBootDefinitionConfigs, springBootDefinitionConfig)
@@ -139,14 +158,18 @@ func (s *SpringBootDefinitionConfig) Create(
 		Definition: tpapi_v0.Definition{
 			Name: springBootDefinitionValues.Name,
 		},
-		Image:       springBootDefinitionValues.Image,
-		Profile:     springBootDefinitionValues.Profile,
-		ServerPort:  springBootDefinitionValues.ServerPort,
-		JavaOpts:    springBootDefinitionValues.JavaOpts,
-		Environment: springBootDefinitionValues.Environment,
-		Replicas:    springBootDefinitionValues.Replicas,
-		Database:    springBootDefinitionValues.Database,
-		HealthPath:  springBootDefinitionValues.HealthPath,
+		Image:         springBootDefinitionValues.Image,
+		Profile:       springBootDefinitionValues.Profile,
+		ServerPort:    springBootDefinitionValues.ServerPort,
+		JavaOpts:      springBootDefinitionValues.JavaOpts,
+		CpuRequest:    springBootDefinitionValues.CpuRequest,
+		CpuLimit:      springBootDefinitionValues.CpuLimit,
+		MemoryRequest: springBootDefinitionValues.MemoryRequest,
+		MemoryLimit:   springBootDefinitionValues.MemoryLimit,
+		Environment:   springBootDefinitionValues.Environment,
+		Replicas:      springBootDefinitionValues.Replicas,
+		Database:      springBootDefinitionValues.Database,
+		HealthPath:    springBootDefinitionValues.HealthPath,
 	}
 
 	// create spring boot definition
@@ -162,16 +185,20 @@ func (s *SpringBootDefinitionConfig) Create(
 	// construct spring boot definition config
 	createdSpringBootDefinitionConfig := &SpringBootDefinitionConfig{
 		SpringBootDefinition: SpringBootDefinitionValues{
-			Name:        createdSpringBootDefinition.Name,
-			Image:       createdSpringBootDefinition.Image,
-			Profile:     createdSpringBootDefinition.Profile,
-			ServerPort:  createdSpringBootDefinition.ServerPort,
-			JavaOpts:    createdSpringBootDefinition.JavaOpts,
-			Environment: createdSpringBootDefinition.Environment,
-			Replicas:    createdSpringBootDefinition.Replicas,
-			Database:    createdSpringBootDefinition.Database,
-			HealthPath:  createdSpringBootDefinition.HealthPath,
-			Age:         util.Ptr(util.GetAgeFormatted(createdSpringBootDefinition.CreatedAt)),
+			Name:          createdSpringBootDefinition.Name,
+			Image:         createdSpringBootDefinition.Image,
+			Profile:       createdSpringBootDefinition.Profile,
+			ServerPort:    createdSpringBootDefinition.ServerPort,
+			JavaOpts:      createdSpringBootDefinition.JavaOpts,
+			CpuRequest:    createdSpringBootDefinition.CpuRequest,
+			CpuLimit:      createdSpringBootDefinition.CpuLimit,
+			MemoryRequest: createdSpringBootDefinition.MemoryRequest,
+			MemoryLimit:   createdSpringBootDefinition.MemoryLimit,
+			Environment:   createdSpringBootDefinition.Environment,
+			Replicas:      createdSpringBootDefinition.Replicas,
+			Database:      createdSpringBootDefinition.Database,
+			HealthPath:    createdSpringBootDefinition.HealthPath,
+			Age:           util.Ptr(util.GetAgeFormatted(createdSpringBootDefinition.CreatedAt)),
 		},
 	}
 
@@ -214,14 +241,18 @@ func (s *SpringBootDefinitionConfig) Replace(
 		Definition: tpapi_v0.Definition{
 			Name: springBootDefinitionValues.Name,
 		},
-		Image:       springBootDefinitionValues.Image,
-		Profile:     springBootDefinitionValues.Profile,
-		ServerPort:  springBootDefinitionValues.ServerPort,
-		JavaOpts:    springBootDefinitionValues.JavaOpts,
-		Environment: springBootDefinitionValues.Environment,
-		Replicas:    springBootDefinitionValues.Replicas,
-		Database:    springBootDefinitionValues.Database,
-		HealthPath:  springBootDefinitionValues.HealthPath,
+		Image:         springBootDefinitionValues.Image,
+		Profile:       springBootDefinitionValues.Profile,
+		ServerPort:    springBootDefinitionValues.ServerPort,
+		JavaOpts:      springBootDefinitionValues.JavaOpts,
+		CpuRequest:    springBootDefinitionValues.CpuRequest,
+		CpuLimit:      springBootDefinitionValues.CpuLimit,
+		MemoryRequest: springBootDefinitionValues.MemoryRequest,
+		MemoryLimit:   springBootDefinitionValues.MemoryLimit,
+		Environment:   springBootDefinitionValues.Environment,
+		Replicas:      springBootDefinitionValues.Replicas,
+		Database:      springBootDefinitionValues.Database,
+		HealthPath:    springBootDefinitionValues.HealthPath,
 
 		// the workload definition is an owned relationship the reconciler sets,
 		// not something the user configures. A replacement that left it out
@@ -243,16 +274,20 @@ func (s *SpringBootDefinitionConfig) Replace(
 	// construct updated spring boot definition config
 	updatedSpringBootDefinitionConfig := &SpringBootDefinitionConfig{
 		SpringBootDefinition: SpringBootDefinitionValues{
-			Name:        replacedSpringBootDefinition.Name,
-			Image:       replacedSpringBootDefinition.Image,
-			Profile:     replacedSpringBootDefinition.Profile,
-			ServerPort:  replacedSpringBootDefinition.ServerPort,
-			JavaOpts:    replacedSpringBootDefinition.JavaOpts,
-			Environment: replacedSpringBootDefinition.Environment,
-			Replicas:    replacedSpringBootDefinition.Replicas,
-			Database:    replacedSpringBootDefinition.Database,
-			HealthPath:  replacedSpringBootDefinition.HealthPath,
-			Age:         util.Ptr(util.GetAgeFormatted(replacedSpringBootDefinition.CreatedAt)),
+			Name:          replacedSpringBootDefinition.Name,
+			Image:         replacedSpringBootDefinition.Image,
+			Profile:       replacedSpringBootDefinition.Profile,
+			ServerPort:    replacedSpringBootDefinition.ServerPort,
+			JavaOpts:      replacedSpringBootDefinition.JavaOpts,
+			CpuRequest:    replacedSpringBootDefinition.CpuRequest,
+			CpuLimit:      replacedSpringBootDefinition.CpuLimit,
+			MemoryRequest: replacedSpringBootDefinition.MemoryRequest,
+			MemoryLimit:   replacedSpringBootDefinition.MemoryLimit,
+			Environment:   replacedSpringBootDefinition.Environment,
+			Replicas:      replacedSpringBootDefinition.Replicas,
+			Database:      replacedSpringBootDefinition.Database,
+			HealthPath:    replacedSpringBootDefinition.HealthPath,
+			Age:           util.Ptr(util.GetAgeFormatted(replacedSpringBootDefinition.CreatedAt)),
 		},
 	}
 
@@ -376,6 +411,27 @@ func (s *SpringBootDefinitionConfig) Validate() error {
 				"invalid value in config for Database: %s: must be %s or %s",
 				*springBootDefinitionValues.Database,
 				api_v0.DatabaseNone, api_v0.DatabasePostgres,
+			))
+		}
+	}
+
+	// the four resource fields become Kubernetes quantities. An unparseable one
+	// is rejected when the manifest is applied, which is well after the
+	// definition was accepted - and an application that was deployed with a
+	// limit the user believes is in force, but which never reached the cluster,
+	// is worse than one rejected up front.
+	for field, quantity := range map[string]*string{
+		"CpuRequest":    springBootDefinitionValues.CpuRequest,
+		"CpuLimit":      springBootDefinitionValues.CpuLimit,
+		"MemoryRequest": springBootDefinitionValues.MemoryRequest,
+		"MemoryLimit":   springBootDefinitionValues.MemoryLimit,
+	} {
+		if quantity == nil {
+			continue
+		}
+		if _, err := resource.ParseQuantity(*quantity); err != nil {
+			multiError.AppendError(fmt.Errorf(
+				"invalid value in config for %s: %s: %w", field, *quantity, err,
 			))
 		}
 	}

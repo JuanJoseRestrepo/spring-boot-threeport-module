@@ -11,6 +11,7 @@ import (
 	tpclientlib "github.com/threeport/threeport/pkg/client/lib/v0"
 	tpclient "github.com/threeport/threeport/pkg/client/v0"
 	controller "github.com/threeport/threeport/pkg/controller/v0"
+	util "github.com/threeport/threeport/pkg/util/v0"
 
 	v0 "spring-boot-threeport-module/pkg/api/v0"
 	client_v0 "spring-boot-threeport-module/pkg/client/v0"
@@ -65,12 +66,21 @@ func v0SpringBootDefinitionCreated(
 		javaOpts = *springBootDefinition.JavaOpts
 	}
 
+	cpuRequest := util.Deref(springBootDefinition.CpuRequest)
+	cpuLimit := util.Deref(springBootDefinition.CpuLimit)
+	memoryRequest := util.Deref(springBootDefinition.MemoryRequest)
+	memoryLimit := util.Deref(springBootDefinition.MemoryLimit)
+
 	yamlDoc, err := springBootYaml(springBootManifestInput{
 		definitionName: *springBootDefinition.Name,
 		image:          *springBootDefinition.Image,
 		profile:        profile,
 		serverPort:     serverPort,
 		javaOpts:       javaOpts,
+		cpuRequest:     cpuRequest,
+		cpuLimit:       cpuLimit,
+		memoryRequest:  memoryRequest,
+		memoryLimit:    memoryLimit,
 		replicas:       replicas,
 		environment:    environment,
 		database:       database,

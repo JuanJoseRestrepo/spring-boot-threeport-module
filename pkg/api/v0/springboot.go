@@ -42,11 +42,29 @@ type SpringBootDefinition struct {
 	// Service has to agree with whatever server.port the image is built with.
 	ServerPort *int `validate:"optional" gorm:"default:8080"`
 
-	// Options passed to the JVM through JAVA_TOOL_OPTIONS, e.g. -Xmx512m. The
-	// JVM sizes its heap from the container's memory limit on its own, so this
-	// is for the cases where that default is wrong rather than something every
-	// application needs to set.
+	// Options passed to the JVM through JAVA_TOOL_OPTIONS, e.g. -Xmx512m.
+	//
+	// A JVM in a container sizes its heap at a quarter of the memory it can
+	// see, and what it can see is the container's memory limit when there is
+	// one and the whole node when there is not. Setting MemoryLimit is
+	// therefore the usual way to size the heap, and this field is for when
+	// that quarter is the wrong fraction.
 	JavaOpts *string `validate:"optional"`
+
+	// CPU and memory for the application container, as Kubernetes quantities:
+	// "500m", "1", "512Mi", "2Gi".
+	//
+	// MemoryLimit is worth setting on any Spring Boot application. Without it
+	// the JVM reads the node's memory rather than the container's, so a pod on
+	// a 64Gi node sizes its heap at 16Gi and several replicas between them
+	// claim an entitlement the node cannot honour. The module applies no
+	// default, because a limit below what an application needs turns a working
+	// deployment into a crash loop and only the application's owner knows what
+	// that figure is.
+	CpuRequest    *string `validate:"optional"`
+	CpuLimit      *string `validate:"optional"`
+	MemoryRequest *string `validate:"optional"`
+	MemoryLimit   *string `validate:"optional"`
 
 	// The environment type used to determine config settings for a Spring Boot
 	// definition.

@@ -44,6 +44,10 @@ type springBootManifestInput struct {
 	profile        string
 	serverPort     int
 	javaOpts       string
+	cpuRequest     string
+	cpuLimit       string
+	memoryRequest  string
+	memoryLimit    string
 	replicas       int
 	environment    string
 	database       string
@@ -287,6 +291,12 @@ func springBootYaml(in springBootManifestInput) (string, error) {
 	if len(appEnv) > 0 {
 		appContainer["env"] = appEnv
 	}
+	// an empty resources block is not the same as none: the kube API accepts
+	// it, but a LimitRange in the namespace would then have nothing to default
+	// against the way it does when the field is absent
+	if resources := containerResources(in); len(resources) > 0 {
+		appContainer["resources"] = resources
+	}
 
 	appPodSpec := map[string]interface{}{
 		"containers": []interface{}{appContainer},
@@ -364,6 +374,37 @@ func springBootYaml(in springBootManifestInput) (string, error) {
 	}
 
 	return yamlDoc, nil
+}
+
+// containerResources builds the application container's resources block from
+// whichever of the four quantities were set, and returns nil when none were.
+//
+// Requests and limits are kept independent rather than defaulting one from the
+// other. A request is what the scheduler reserves and a limit is what the
+// kernel enforces, and for a JVM the limit is also what the heap is sized
+// from, so inferring either from the other would be guessing at a number the
+// application's owner chose deliberately.
+func containerResources(in springBootManifestInput) map[string]interface{} {
+	resources := map[string]interface{}{}
+	for key, quantities := range map[string]map[string]string{
+		"requests": {"cpu": in.cpuRequest, "memory": in.memoryRequest},
+		"limits":   {"cpu": in.cpuLimit, "memory": in.memoryLimit},
+	} {
+		set := map[string]interface{}{}
+		for name, quantity := range quantities {
+			if quantity != "" {
+				set[name] = quantity
+			}
+		}
+		if len(set) > 0 {
+			resources[key] = set
+		}
+	}
+	if len(resources) == 0 {
+		return nil
+	}
+
+	return resources
 }
 
 // secretEnv builds an environment variable sourced from a key in a Secret.

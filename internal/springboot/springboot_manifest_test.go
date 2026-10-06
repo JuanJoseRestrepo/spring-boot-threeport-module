@@ -171,6 +171,62 @@ func defaultInput() springBootManifestInput {
 // TestSpringBootYaml_NoDatabase covers the default: a Spring Boot application
 // can run on an embedded database, so asking for none must leave out the
 // PostgreSQL objects entirely rather than deploy an unused database.
+// TestSpringBootYaml_ResourcesOmittedWhenUnset covers the resources block being
+// absent rather than empty. A LimitRange in the namespace defaults against an
+// absent field and has nothing to default against an empty one.
+func TestSpringBootYaml_ResourcesOmittedWhenUnset(t *testing.T) {
+	doc, err := springBootYaml(defaultInput())
+	require.NoError(t, err)
+
+	assert.NotContains(t, appContainer(t, doc, "myapp"), "resources")
+}
+
+// TestSpringBootYaml_Resources covers each of the four quantities reaching the
+// container, and requests and limits staying independent: a limit is what the
+// JVM sizes its heap from, so inferring one from the other would be guessing at
+// a number the user chose deliberately.
+func TestSpringBootYaml_Resources(t *testing.T) {
+	in := defaultInput()
+	in.cpuRequest = "250m"
+	in.memoryLimit = "1Gi"
+
+	doc, err := springBootYaml(in)
+	require.NoError(t, err)
+
+	resources, ok := appContainer(t, doc, "myapp")["resources"].(map[string]interface{})
+	require.True(t, ok, "the resources block must be set")
+
+	requests, _ := resources["requests"].(map[string]interface{})
+	limits, _ := resources["limits"].(map[string]interface{})
+	assert.Equal(t, "250m", requests["cpu"])
+	assert.Equal(t, "1Gi", limits["memory"])
+	assert.NotContains(t, requests, "memory", "a memory request was not asked for")
+	assert.NotContains(t, limits, "cpu", "a cpu limit was not asked for")
+
+	in.cpuLimit = "1"
+	in.memoryRequest = "512Mi"
+	doc, err = springBootYaml(in)
+	require.NoError(t, err)
+	resources = appContainer(t, doc, "myapp")["resources"].(map[string]interface{})
+	assert.Equal(t, "512Mi", resources["requests"].(map[string]interface{})["memory"])
+	assert.Equal(t, "1", resources["limits"].(map[string]interface{})["cpu"])
+}
+
+// TestSpringBootYaml_ResourcesOnlyOnTheApplication covers the database keeping
+// its own sizing: postgres is not a JVM and has nothing to do with the heap the
+// application was sized for.
+func TestSpringBootYaml_ResourcesOnlyOnTheApplication(t *testing.T) {
+	in := defaultInput()
+	in.database = api_v0.DatabasePostgres
+	in.memoryLimit = "1Gi"
+
+	doc, err := springBootYaml(in)
+	require.NoError(t, err)
+
+	postgres := containerIn(t, doc, "myapp-postgres", "postgres")
+	assert.NotContains(t, postgres, "resources", "the application's limit must not be applied to the database")
+}
+
 func TestSpringBootYaml_NoDatabase(t *testing.T) {
 	doc, err := springBootYaml(defaultInput())
 	require.NoError(t, err)

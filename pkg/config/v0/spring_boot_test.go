@@ -117,6 +117,35 @@ func TestSpringBootDefinitionConfig_Validate(t *testing.T) {
 			},
 		},
 		{
+			name: "an unparseable memory limit is rejected",
+			values: SpringBootDefinitionValues{
+				Name:        util.Ptr("myapp"),
+				Image:       util.Ptr("myorg/myapp:v1"),
+				MemoryLimit: util.Ptr("1 gig"),
+			},
+			wantErr: "MemoryLimit",
+		},
+		{
+			name: "ordinary kubernetes quantities are accepted",
+			values: SpringBootDefinitionValues{
+				Name:          util.Ptr("myapp"),
+				Image:         util.Ptr("myorg/myapp:v1"),
+				CpuRequest:    util.Ptr("250m"),
+				CpuLimit:      util.Ptr("1"),
+				MemoryRequest: util.Ptr("512Mi"),
+				MemoryLimit:   util.Ptr("2Gi"),
+			},
+		},
+		{
+			name: "a cpu request in the wrong unit is rejected",
+			values: SpringBootDefinitionValues{
+				Name:       util.Ptr("myapp"),
+				Image:      util.Ptr("myorg/myapp:v1"),
+				CpuRequest: util.Ptr("250mcpu"),
+			},
+			wantErr: "CpuRequest",
+		},
+		{
 			name: "a health path without a leading slash is rejected",
 			values: SpringBootDefinitionValues{
 				Name:       util.Ptr("myapp"),
@@ -199,6 +228,8 @@ func TestMapToSpringBootDefinedInstances(t *testing.T) {
 			Environment: util.Ptr("prod"),
 			Replicas:    util.Ptr(3),
 			Database:    util.Ptr(api_v0.DatabasePostgres),
+			CpuRequest:  util.Ptr("250m"),
+			MemoryLimit: util.Ptr("2Gi"),
 		}},
 		{SpringBootDefinition: SpringBootDefinitionValues{Name: util.Ptr("other")}},
 	}
@@ -222,6 +253,13 @@ func TestMapToSpringBootDefinedInstances(t *testing.T) {
 	assert.Equal(t, "postgres,prod", *values.Profile)
 	assert.Equal(t, 9000, *values.ServerPort)
 	assert.Equal(t, api_v0.DatabasePostgres, *values.Database)
+	// the resource fields travel with the rest: a defined instance read back
+	// has to describe what was deployed, or a get reports a workload with no
+	// limits that has them
+	require.NotNil(t, values.CpuRequest, "CpuRequest did not survive the mapping")
+	assert.Equal(t, "250m", *values.CpuRequest)
+	require.NotNil(t, values.MemoryLimit, "MemoryLimit did not survive the mapping")
+	assert.Equal(t, "2Gi", *values.MemoryLimit)
 	assert.Equal(t, "www", *values.SubDomain, "the instance's attributes have to survive it too")
 	assert.Equal(t, "2d", *values.Age)
 }

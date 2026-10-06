@@ -28,7 +28,13 @@ SpringBootDefinition:
   # endpoint; an image built without the actuator has to point this somewhere
   # that answers
   HealthPath: /actuator/health
-  # passed to the JVM through JAVA_TOOL_OPTIONS. The JVM sizes its heap from
-  # the container's memory limit on its own, so this is only for when that
-  # default is wrong
-  JavaOpts: -Xmx512m
+  # CPU and memory for the application container. MemoryLimit is the one worth
+  # setting on any Spring Boot application: a JVM sizes its heap at a quarter
+  # of the memory it can see, and without a limit that is the node's memory,
+  # so a pod on a 64Gi node would size its heap at 16Gi. petclinic settles at
+  # about 300Mi, so 1Gi leaves room and gives it a 256Mi heap.
+  MemoryRequest: 512Mi
+  MemoryLimit: 1Gi
+  CpuRequest: 250m
+  # JAVA_TOOL_OPTIONS, for when a quarter of the limit is the wrong fraction.
+  # Left out here: the limit above is doing the sizing.
