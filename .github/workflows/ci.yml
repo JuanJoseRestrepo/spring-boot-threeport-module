@@ -1,10 +1,12 @@
-# Verification for the module.
+# Everything that has to hold before a change lands.
 #
-# Two jobs. The first is fast and covers the Go code; the second builds the
-# sample image, which takes minutes because Maven compiles petclinic from
-# source, so it runs alongside rather than holding up the first.
+# Two jobs. The first is fast and covers the Go code - formatting, build, vet,
+# the unit tests, and that the generated code still matches what the SDK
+# produces. The second builds the sample image, which takes minutes because
+# Maven compiles petclinic from source, so it runs alongside rather than
+# holding the first up.
 
-name: Test
+name: CI
 
 on:
   pull_request:
