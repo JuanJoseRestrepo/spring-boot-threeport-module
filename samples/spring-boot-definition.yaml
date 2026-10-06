@@ -4,7 +4,7 @@
 #   tptctl spring-boot create spring-boot-definition -c samples/spring-boot-definition.yaml
 SpringBootDefinition:
   Name: petclinic
-  Image: localhost:5001/spring-petclinic:v0.1.0
+  Image: localhost:5001/spring-petclinic:v0.2.0
   # deploys PostgreSQL alongside the application and points the datasource at
   # it. Left out, the application runs on whatever database its image is built
   # with, which for petclinic is an in-memory H2 that starts empty every time.
@@ -13,19 +13,14 @@ SpringBootDefinition:
   # petclinic needs its postgres profile to pick up the datasource.
   Profile: postgres
   Environment: prod
-  # one replica, although prod would otherwise give three.
+  # three replicas. The sample image builds petclinic with Flyway, which takes
+  # a database lock for the duration of a migration, so any number of replicas
+  # can start at once against an empty database: one applies the migrations and
+  # the rest find them already applied.
   #
-  # petclinic initialises its schema on startup rather than through Flyway or
-  # Liquibase, and PostgreSQL's CREATE INDEX IF NOT EXISTS checks the catalog
-  # and then creates, which is not atomic. Two replicas starting together
-  # against an empty database both pass the check and the second dies with
-  # "duplicate key value violates unique constraint pg_class_relname_nsp_index".
-  # It recovers on restart because the schema exists by then, but the first
-  # deploy is a crash loop for no reason.
-  #
-  # An application that uses Flyway or Liquibase takes a lock and can be
-  # deployed at any replica count.
-  Replicas: 1
+  # Upstream petclinic initialises its schema from spring.sql.init instead, and
+  # that is not concurrency-safe - see the README.
+  Replicas: 3
   # the port the image serves on. Left out, it defaults to 8080, which is what
   # Spring Boot uses unless the project changed server.port
   ServerPort: 8080

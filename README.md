@@ -127,11 +127,14 @@ The application connects to `jdbc:postgresql://petclinic-postgres:5432/springboo
 — the module's service and database rather than petclinic's own defaults —
 creates its schema, and serves the seeded records from it.
 
+At three replicas, all three start together against an empty database and none
+of them restarts: one applies the Flyway migrations and the other two log
+`Schema "public" is up to date`. The history table holds each migration once
+and the seed data is not duplicated.
+
 Deleting an instance removes the workload, its namespace and its volume, with
 no orphaned PersistentVolume left behind; deleting a definition removes the
 workload definition.
-
-One defect came out of those runs and is described below.
 
 
 ## Known limitations
@@ -144,20 +147,18 @@ of them failed a test, so treat this as untested until that section says
 otherwise.
 
 **An application that initialises its schema on startup cannot be deployed at
-more than one replica against an empty database.** Petclinic does this rather
-than using Flyway or Liquibase, and PostgreSQL's `CREATE INDEX IF NOT EXISTS`
-checks the catalog and then creates, which is not atomic. Two replicas starting
-together both pass the check, and the second dies with `duplicate key value
-violates unique constraint "pg_class_relname_nsp_index"`. It recovers on
-restart, because the schema exists by the time it comes back, so the deployment
-does reach ready — but the first deploy is a crash loop, and `prod` defaults to
-three replicas, so most of them crash.
+more than one replica against an empty database.** This is a property of the
+application, not of the module. PostgreSQL's `CREATE INDEX IF NOT EXISTS`
+checks the catalog and then creates, which is not atomic, so two replicas
+running the same bootstrap script together both pass the check and the second
+dies with `duplicate key value violates unique constraint
+"pg_class_relname_nsp_index"`. It recovers on restart, because the schema
+exists by then, so the deployment still reaches ready.
 
-The module cannot fix this: the schema initialisation happens inside the
-application, and a Deployment creates all of its replicas at once. An
-application using Flyway or Liquibase takes a lock and is safe at any replica
-count. `samples/spring-boot-definition.yaml` therefore asks for one replica and
-says why.
+The module cannot fix it: the initialisation happens inside the application and
+a Deployment creates all of its replicas at once. An application using Flyway
+or Liquibase takes a database lock and is safe at any replica count, which is
+why the sample image builds petclinic with Flyway — see below.
 
 **No managed database.** The database is always a containerized Postgres
 deployed alongside the application. The WordPress module offers a
@@ -209,6 +210,30 @@ module configures it.
 The source is fetched at build time from a pinned commit rather than vendored.
 Petclinic's `main` carries a SNAPSHOT version, so an unpinned build is a
 different application every time.
+
+### Why the sample is patched
+
+Upstream petclinic initialises its schema from `spring.sql.init`, which is
+Spring's development pattern and is not safe to run from several replicas at
+once. The build therefore adds Flyway over the pinned source: the same
+`db/postgres` SQL becomes `V1__schema.sql` and `V2__seed_data.sql` under
+`db/migration/postgres`, the postgres profile switches the startup initialiser
+off, and `spring-boot-starter-flyway` goes into the POM. Flyway holds a
+database lock for the duration of a migration, so any number of replicas can
+start together.
+
+The dependency is the starter rather than `flyway-core`. Spring Boot 4 moved
+each autoconfiguration into its own module, so `flyway-core` alone puts Flyway
+on the classpath with nothing to start it, and the migrations are silently
+never run — the application starts, connects, and serves against a database
+with no tables.
+
+This is a patch over a pinned upstream rather than a fork of it. The change is
+three small files plus a POM insertion, it is reviewable in this repository
+beside the code that depends on it, and moving to a newer petclinic is a change
+to `PETCLINIC_REF` rather than a rebase of a fork that has to be kept alive.
+Upstream will not take the change: there have been four Liquibase pull requests
+against petclinic and all four were closed unmerged.
 
 ### 1. Build and publish the sample image
 

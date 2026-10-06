@@ -1,0 +1,13 @@
+    <!-- spring-boot-starter-flyway, not flyway-core on its own: Spring Boot 4
+         moved each autoconfiguration into its own module, so flyway-core puts
+         Flyway on the classpath without anything to start it, and migrations
+         are silently never run. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-flyway</artifactId>
+    </dependency>
+    <!-- Flyway needs the module for the database it is talking to -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
