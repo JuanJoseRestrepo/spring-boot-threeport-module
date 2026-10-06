@@ -13,12 +13,20 @@ on:
       - edited
       - synchronize
       - reopened
+  # every branch, not just main. A pull_request event fires in the repository
+  # the PR targets, so work pushed to a fork gets no verification until the PR
+  # is opened - and none at all while that repository has Actions disabled.
   push:
-    branches:
-      - main
 
 permissions:
   contents: read
+
+# a branch with a PR open matches both triggers above. Rather than drop one and
+# lose coverage in the fork, superseded runs are cancelled: the useful run is
+# the one for the newest commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   unit-tests:
