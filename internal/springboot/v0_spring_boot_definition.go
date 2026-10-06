@@ -66,10 +66,10 @@ func v0SpringBootDefinitionCreated(
 		javaOpts = *springBootDefinition.JavaOpts
 	}
 
-	cpuRequest := util.Deref(springBootDefinition.CpuRequest)
-	cpuLimit := util.Deref(springBootDefinition.CpuLimit)
-	memoryRequest := util.Deref(springBootDefinition.MemoryRequest)
-	memoryLimit := util.Deref(springBootDefinition.MemoryLimit)
+	cpuRequest, cpuLimit, memoryRequest, memoryLimit := resourcesFor(
+		springBootDefinition,
+		environment,
+	)
 
 	yamlDoc, err := springBootYaml(springBootManifestInput{
 		definitionName: *springBootDefinition.Name,
@@ -180,6 +180,74 @@ func v0SpringBootDefinitionDeleted(
 	}
 
 	return 0, nil
+}
+
+// resourcesFor returns the application container's CPU and memory, taking what
+// the definition states and filling in the rest from the environment.
+//
+// CPU and memory are defaulted as units: if the definition sets either memory
+// field the module leaves memory alone, and likewise for CPU. Defaulting one
+// side of a pair can produce a request above a limit, which the kube API
+// rejects - a definition asking for a 4Gi request would otherwise be given the
+// environment's 1Gi limit and fail to deploy at all.
+func resourcesFor(
+	springBootDefinition *v0.SpringBootDefinition,
+	environment string,
+) (cpuRequest, cpuLimit, memoryRequest, memoryLimit string) {
+	cpuRequest = util.Deref(springBootDefinition.CpuRequest)
+	cpuLimit = util.Deref(springBootDefinition.CpuLimit)
+	memoryRequest = util.Deref(springBootDefinition.MemoryRequest)
+	memoryLimit = util.Deref(springBootDefinition.MemoryLimit)
+
+	defaults := resourcesByEnv(environment)
+	if cpuRequest == "" && cpuLimit == "" {
+		cpuRequest = defaults.cpuRequest
+	}
+	if memoryRequest == "" && memoryLimit == "" {
+		memoryRequest = defaults.memoryRequest
+		memoryLimit = defaults.memoryLimit
+	}
+
+	return cpuRequest, cpuLimit, memoryRequest, memoryLimit
+}
+
+// envResources is the sizing an environment gets when the definition states
+// none.
+type envResources struct {
+	cpuRequest    string
+	memoryRequest string
+	memoryLimit   string
+}
+
+// resourcesByEnv returns the default sizing for an environment.
+//
+// A memory limit is defaulted because the alternative is worse than a wrong
+// number: without one the JVM reads the node's memory and sizes its heap at a
+// quarter of it, so a pod on a 64Gi node sizes itself for 16Gi and several
+// replicas between them claim an entitlement the node cannot honour. The
+// figures leave a JVM 256MB of heap in development and 512MB in production,
+// against the sample application's roughly 300MB of total usage.
+//
+// There is no default CPU limit. A JVM is at its most CPU-hungry while the
+// application context is starting, and a limit low enough to matter later
+// throttles it exactly then, turning a slow start into a failed one. The
+// request is what the scheduler reserves and is enough to place the pod
+// sensibly.
+func resourcesByEnv(env string) envResources {
+	switch env {
+	case "prod":
+		return envResources{
+			cpuRequest:    "500m",
+			memoryRequest: "1Gi",
+			memoryLimit:   "2Gi",
+		}
+	default:
+		return envResources{
+			cpuRequest:    "250m",
+			memoryRequest: "512Mi",
+			memoryLimit:   "1Gi",
+		}
+	}
 }
 
 // replicasByEnv returns the default replica count for an environment, used when

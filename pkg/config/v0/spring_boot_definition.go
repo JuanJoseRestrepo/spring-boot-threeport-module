@@ -436,6 +436,33 @@ func (s *SpringBootDefinitionConfig) Validate() error {
 		}
 	}
 
+	// a request above its own limit is rejected by the kube API when the
+	// manifest is applied, and the definition is accepted long before that
+	for _, pair := range []struct {
+		kind           string
+		request, limit *string
+	}{
+		{"Cpu", springBootDefinitionValues.CpuRequest, springBootDefinitionValues.CpuLimit},
+		{"Memory", springBootDefinitionValues.MemoryRequest, springBootDefinitionValues.MemoryLimit},
+	} {
+		if pair.request == nil || pair.limit == nil {
+			continue
+		}
+		request, requestErr := resource.ParseQuantity(*pair.request)
+		limit, limitErr := resource.ParseQuantity(*pair.limit)
+		// an unparseable value is already reported above; saying so twice
+		// would only make the error harder to read
+		if requestErr != nil || limitErr != nil {
+			continue
+		}
+		if request.Cmp(limit) > 0 {
+			multiError.AppendError(fmt.Errorf(
+				"invalid values in config: %sRequest %s is above %sLimit %s",
+				pair.kind, *pair.request, pair.kind, *pair.limit,
+			))
+		}
+	}
+
 	// the probes ask for this path over HTTP. A value without a leading slash
 	// is rejected by the kube API when the manifest is applied, which is well
 	// after the definition was accepted.

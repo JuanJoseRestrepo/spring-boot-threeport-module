@@ -28,11 +28,16 @@ SpringBootDefinition:
   # endpoint; an image built without the actuator has to point this somewhere
   # that answers
   HealthPath: /actuator/health
-  # CPU and memory for the application container. MemoryLimit is the one worth
-  # setting on any Spring Boot application: a JVM sizes its heap at a quarter
-  # of the memory it can see, and without a limit that is the node's memory,
-  # so a pod on a 64Gi node would size its heap at 16Gi. petclinic settles at
-  # about 300Mi, so 1Gi leaves room and gives it a 256Mi heap.
+  # CPU and memory for the application container. Left out entirely, the
+  # environment decides: prod would give 1Gi/2Gi of memory and 500m of CPU.
+  # These are set to show the override, and because petclinic settles at about
+  # 300Mi and does not need the prod sizing - 1Gi gives its JVM a 256Mi heap.
+  #
+  # Memory and CPU are defaulted as units: stating either memory field leaves
+  # memory entirely to you, so a request cannot end up above a limit it was
+  # never meant to pair with. No CPU limit is ever defaulted, because a JVM is
+  # at its hungriest while its context starts and a limit throttles it exactly
+  # then.
   MemoryRequest: 512Mi
   MemoryLimit: 1Gi
   CpuRequest: 250m

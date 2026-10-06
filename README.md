@@ -20,7 +20,7 @@ configured. It is the reusable part: one definition can back many instances.
 | `Profile` | no | Passed as `SPRING_PROFILES_ACTIVE`. Spring reads it as a comma separated list; the module does not interpret it. |
 | `ServerPort` | no | The port the image serves on. Defaults to `8080`, which is Spring Boot's default unless the project changed `server.port`. The Service targets whatever this says. |
 | `JavaOpts` | no | Passed as `JAVA_TOOL_OPTIONS`, e.g. `-Xmx512m`. A JVM sizes its heap at a quarter of the memory it can see, so `MemoryLimit` is the usual way to size it and this is for when that quarter is the wrong fraction. |
-| `CpuRequest`, `CpuLimit`, `MemoryRequest`, `MemoryLimit` | no | Kubernetes quantities for the application container. `MemoryLimit` is worth setting on any Spring Boot application: without it the JVM reads the node's memory rather than the container's, so a pod on a 64Gi node sizes its heap at 16Gi. No default is applied — a limit below what an application needs turns a working deployment into a crash loop, and only its owner knows that figure. |
+| `CpuRequest`, `CpuLimit`, `MemoryRequest`, `MemoryLimit` | no | Kubernetes quantities for the application container. Left unset, `Environment` decides: 512Mi/1Gi of memory and 250m of CPU for development, 1Gi/2Gi and 500m for production. CPU and memory are defaulted as units — stating either memory field leaves memory entirely to you — and no CPU limit is ever defaulted. See below. |
 | `Database` | no | `none` or `postgres`. Defaults to `none`. |
 | `HealthPath` | no | The path the probes ask for. Defaults to `/actuator/health`. |
 | `Environment` | no | Drives replica and storage defaults. Defaults to `dev`. |
@@ -171,15 +171,16 @@ a Deployment creates all of its replicas at once. An application using Flyway
 or Liquibase takes a database lock and is safe at any replica count, which is
 why the sample image builds petclinic with Flyway — see below.
 
-**No default is applied to the resource fields,** so an application deployed
-without a `MemoryLimit` gets a JVM sized from the node rather than the
-container. Defaulting one by `Environment`, the way replicas and database
-storage are defaulted, would fix that for every deployment that does not think
-about it — at the cost that an application needing more than the default would
-crash-loop where today it would merely over-claim. Which of those is the better
-failure is a decision for the project rather than this module, and it matters
-more now that multiple replicas are expected: three unbounded JVMs on one node
-size themselves for three quarters of its memory between them.
+**The default memory limit is a guess at someone else's application.** A
+Spring Boot application needing more than its environment's limit will be
+OOM-killed where, with no limit at all, it would merely over-claim. The
+alternative is worse: without a limit the JVM reads the node's memory and sizes
+its heap at a quarter of it, so a pod on a 64Gi node sizes itself for a 16Gi
+heap and three replicas between them claim an entitlement the node cannot
+honour. The figures leave a JVM 256MB of heap in development and 512MB in
+production, against the sample application's roughly 300MB of total usage. An
+application that needs more says so, and stating either memory field turns the
+defaulting off for memory entirely.
 
 **No managed database.** The database is always a containerized Postgres
 deployed alongside the application. The WordPress module offers a

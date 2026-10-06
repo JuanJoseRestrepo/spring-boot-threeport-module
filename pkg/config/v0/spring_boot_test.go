@@ -146,6 +146,35 @@ func TestSpringBootDefinitionConfig_Validate(t *testing.T) {
 			wantErr: "CpuRequest",
 		},
 		{
+			name: "a memory request above its own limit is rejected",
+			values: SpringBootDefinitionValues{
+				Name:          util.Ptr("myapp"),
+				Image:         util.Ptr("myorg/myapp:v1"),
+				MemoryRequest: util.Ptr("2Gi"),
+				MemoryLimit:   util.Ptr("1Gi"),
+			},
+			wantErr: "MemoryRequest 2Gi is above MemoryLimit 1Gi",
+		},
+		{
+			name: "a request equal to its limit is fine",
+			values: SpringBootDefinitionValues{
+				Name:          util.Ptr("myapp"),
+				Image:         util.Ptr("myorg/myapp:v1"),
+				MemoryRequest: util.Ptr("1Gi"),
+				MemoryLimit:   util.Ptr("1024Mi"),
+			},
+		},
+		{
+			name: "a cpu request above its own limit is rejected",
+			values: SpringBootDefinitionValues{
+				Name:       util.Ptr("myapp"),
+				Image:      util.Ptr("myorg/myapp:v1"),
+				CpuRequest: util.Ptr("2"),
+				CpuLimit:   util.Ptr("500m"),
+			},
+			wantErr: "CpuRequest 2 is above CpuLimit 500m",
+		},
+		{
 			name: "a health path without a leading slash is rejected",
 			values: SpringBootDefinitionValues{
 				Name:       util.Ptr("myapp"),
